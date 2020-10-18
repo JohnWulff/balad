@@ -1,0 +1,22 @@
+LOC 10
+5l
+7l
+
+LOC 20
+"%ld + %ld = %ld\n"
+
+LOC 100
+KDD 10
+JZR 114
+KDD 12
+JZR 114
+CLR 777
+LDA 10
+ADD 12
+PRF 20
+ADR 10
+ADR 12
+ADR 0
+JMP 100
+HLT
+

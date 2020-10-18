@@ -1,0 +1,11 @@
+LOC 10
+40
+40l
+"abc\n"
+LOC 100
+PDN 10
+PDD 11
+PRF 13
+HLT
+
+

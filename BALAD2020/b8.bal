@@ -1,0 +1,14 @@
+LOC 10
+"\n"
+
+LOC 100
+PRF 10
+KCH 4
+PCH 4
+PRF 10
+PDN 4
+PRF 10
+PRF 4	; NULL string "" is 0
+JNR 100
+HLT
+

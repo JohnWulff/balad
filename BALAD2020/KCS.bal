@@ -1,0 +1,21 @@
+LOC 20
+"\n"
+"q"
+"This is a ZERO string\n"
+
+LOC 100
+KCS 770
+JNR 103
+PRF 22
+PRF 770
+PRF 20
+LDA 770		; first 2 bytes of input string
+CMP 21		; "q\0"
+JNE 100		; quit if equal
+HLT
+
+LOC 770
+"A"
+
+
+

@@ -1,0 +1,19 @@
+LOC 10
+5
+7
+
+LOC 20
+"%d + %d = %d\n"
+
+LOC 100
+KDN 10
+KDN 11
+CLR 777
+LDA 10
+ADD 11
+PRF 20
+ADR 10
+ADR 11
+ADR 0
+HLT
+
