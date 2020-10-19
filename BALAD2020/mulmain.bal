@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  mulmain.bal	J.E. Wulff 11 Oct 2020
+;  $Id: mulmain.bal 1.1 $
 ;
 ;  Temporary variables
 ;

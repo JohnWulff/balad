@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  compare.bal
+;  $Id: compare.bal 1.1 $
 ;
 ;  Check the CMP instruction with JLT, JGE etc in the BALAD run time
 ;
