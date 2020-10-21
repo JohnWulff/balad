@@ -13,8 +13,8 @@ At the start of every instruction cycle the address in the Program Counter regis
 The Instruction Decoder isolates Bits 1 to 5 of the instruction and uses this as a number to distinguish between one of the 32 possible instructions. The instruction that has been identified is then executed. In a hardwired computer this process involves setting various switches to allow data to flow from various registers to other registers.
 The last 10 bits of the instruction are used to determine a memory reference address. This can again be thought of as setting a big switch which connects one data path to one of 512 words in memory.
 
-The Balad system was developed in 1970 as an aid for teaching electronics technicians and their teachers the basics of how a computer works internally. Even at that time the instruction sets and the multitude of special registers were confusing the fundamental simplicity of a computer based on the original von Neumann architecture. This is a much greater problem in the 21st century and this very simple Balad vitual computer should give students some insights into how the very core of a computer functions.
-The details can easily be taught in one 45 minute lesson and from then on students can test their own skills in manipulating machine instuctions to develop higher level functionality, like a multiply routine, which is not part of the basic instructions set.
-HINT: a very simple multiply algorithm is to add the multiplcand to the accumulator and decrement the multiplier in a loop. Terminate the loop  when the multiiplier is zero.
+The Balad system was developed in 1970 as an aid for teaching electronics technicians and their teachers the basics of how a computer works internally. Even at that time the instruction sets and the multitude of special registers were confusing the fundamental simplicity of a computer based on the original von Neumann architecture. This is a much greater problem in the 21st century and this very simple Balad virtual computer should give students some insights into how the very core of a computer functions.
+The details can easily be taught in one 45 minute lesson and from then on students can test their own skills in manipulating machine instructions to develop higher level functionality, like a multiply routine, which is not part of the basic instructions set.
+HINT: a very simple multiply algorithm is to add the multiplicand to the accumulator and decrement the multiplier in a loop. Terminate the loop  when the multiplier is zero.
 
-$Id: README.md 1.1 $
+$Id: README.md 1.2 $

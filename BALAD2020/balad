@@ -236,7 +236,7 @@ Usage:	@<<<<[ -lh][ balad_source_file ...]
     lB	      list long unsigned binary
     ls	      list text string up to next NULL
     l	      list location(s) in current list mode
-$Id: balad 1.1 $
+$Id: balad 1.2 $
 .
 
 use vars qw($opt_l $opt_d $opt_o $opt_x $opt_b $opt_c $opt_m $opt_T $opt_h);
@@ -551,14 +551,17 @@ sub debug {
 ########################################################################
 
 sub assembleFile {
+    no warnings;
+    no warnings 'deprecated';
     my $comment	= '';
     my ($pass) = @_;
-    my ($op, $num, $offset, $dval, $val, $str, $i, $char, $byte, $bs, $char0, $byte0, $bs0);
+    my ($op, $num, $dval, $val, $locn, $blk, $str, $i, $char, $byte, $bs, $char0, $byte0, $bs0);
     print "Pass = $pass on $argv\n" if $opt_l;
     print "	" if $pass == 0;
-    $str = $dval = $val = undef;
+    $locn = $blk = $str = $dval = $val = undef;
     $state = $byte0 = 0;
     while (<IN>) {
+	s/[ \t]+$//;						# remove trailing spaces and tabs
 	if (m/^\s*([A-Za-z]\w*)\s*:/g) {
 	    if (not defined ($num = $symTable{$1})) {
 		$symTable{$1} = $loc;				# define symbolic reference
@@ -570,40 +573,44 @@ sub assembleFile {
 		$errFlag++ if $pass;
 	    }
 	}
-	if (m/\G\s*([A-Z]+)\s*(@?)\s*(([0-7]+)|([A-Za-z]\w*)|(\.))(\s*([+-])\s*(\d+))?(\s*;.*)?/ and
+	if (m/\G\s*([A-Z]+)\s*(((@?)\s*)(([0-7]+)|((([A-Za-z]\w*)|(\.))(\s*([+-])?\s*(\d+))?)))?(\s*;.*)?$/ and
 	    defined($op = $opCodes{$1}[0]) ) {
-	    $num = $offset = 0;
-	    if (defined $7) {
-		$offset = $9;					# positive offset
-		$offset = -$offset if $8 eq "-";		# negative offset
-	    }
-	    if (defined $4) {
-		$num = oct($4) + $offset;			# octal memory reference
-	    } elsif (defined $5) {
-		if (defined($tmp = $symTable{$5})) {		# symbolic memory reference
-		    $num = $tmp + $offset;
-		} elsif ($pass != 1) {
-		    $tmp = sprintf "%o", $loc;
-		    print "			$_";
-		    warn "*** ERROR: symbolic reference '$5' at loc $tmp has not been defined\n";
-		    $errFlag++ if $pass;
+	    $num = 0;
+	    if ($2) {
+		if (defined $6) {
+		    $num = oct($6);				# octal memory reference
+		} else {
+		    if (defined $9) {
+			if (defined($tmp = $symTable{$9})) {	# symbolic memory reference
+			    $num = $tmp;
+			} elsif ($pass != 1) {
+			    $tmp = sprintf "%o", $loc;
+			    print "			$_";
+			    warn "*** ERROR: symbolic reference '$9' at loc $tmp has not been defined\n";
+			    $errFlag++ if $pass;
+			}
+		    } elsif (defined $10) {
+			$num = $loc;				# "." relative memory reference
+		    }
+		    if (defined $11) {
+			goto SynErr0 unless $12;
+			if ($12 eq "-") {
+			    $num -= $13;			# negative offset
+			} else {
+			    $num += $13;			# positive offset
+			}
+		    }
 		}
-	    } elsif (defined $6) {
-		$num = $loc+ $offset;				# "." relative memory reference
-	    } elsif ($pass != 1) {
-		$tmp = sprintf "%o", $loc;
-		print "			$_";
-		warn "*** ERROR: memory reference at loc $tmp has not been defined\n";
-		$errFlag++ if $pass;
+		if ($pass != 1 and (($num &= 077777) > (($opCodes{$1}[1] || $4) ? 0776 : 0777))) {
+		    $tmp = sprintf "mr %o is illegal %s at loc %o", $num, $num eq 0777 ? "carry" : "memory reference", $loc;
+		    print "			$_";
+		    warn "*** ERROR: $tmp\n";
+		    $errFlag++ if $pass;
+		    goto Retry;
+		}
 	    }
-	    if ($pass != 1 and ($num > (($opCodes{$1}[1] || $2) ? 0776 : 0777))) {
-		$tmp = sprintf "mr %o is illegal %s at loc %o", $num, $num eq 0777 ? "carry" : "memory reference", $loc;
-		print "			$_";
-		warn "*** ERROR: $tmp\n";
-		$errFlag++ if $pass;
-	    }
-	    $val = $op | ($2 ? 01000 : 0) | $num;		# BALAD code statement
-	    $comment = $10;
+	    $val = $op | ($4 ? 01000 : 0) | $num;		# BALAD code statement
+	    $comment = $14;
 	    $state = $op ? 2 : 1;				# follow with code or data if JMP
 	} elsif (m/\G(\s*HLT)(\s*;.*)?$/) {
 	    $val = 0;						# code HLT (JMP 0)
@@ -616,7 +623,7 @@ sub assembleFile {
 		$num = oct $1;					# LOC statement	(octal argument)
 		goto TestLOC;
 	    } elsif (m/\G\s*BLK\s*([1-9][0-9]*)(\s*;.*)?$/) {
-		$num = $loc + $1;				# BLK statement (decimal argument)
+		$blk = $num = $loc + $1;			# BLK statement (decimal argument)
 	      TestLOC:
 		$comment = $2;
 		if ($pass != 1 and ($num <= 01 or $num >= 0776)) {
@@ -629,7 +636,7 @@ sub assembleFile {
 		    $num = sprintf "%o", $num;
 		    goto MemERR2;		# LOC already initialised
 		} else {
-		    $loc = $num;		# LOC 02 to 0775
+		    $locn = $num;		# LOC 02 to 0775
 		    $state = 1;
 		}
 	    } elsif (m/\G\s*([1-9][0-9]*)([lL]?)(\s*;.*)?$/) {
@@ -715,7 +722,7 @@ sub assembleFile {
 	} elsif ($pass != 1) {
 	    $num = sprintf "%o", $loc;
 	    print "			$_";
-	    warn "*** ERROR: syntax error - code block at loc $num must be terminated by a JMP or HLT instruction\n";
+	    warn "*** ERROR: syntax error or code block not terminated by a JMP or HLT instruction at loc $num\n";
 	    $errFlag++ if $pass;
 	    goto Retry;
 	}
@@ -771,6 +778,8 @@ sub assembleFile {
 		} else {
 		    print "\n";
 		}
+	    } elsif (defined $blk) {
+		printf "	%03o		%s", $loc, $_;
 	    } else {
 		printf "			%s", $_;	# all other lines
 	    }
@@ -819,6 +828,8 @@ sub assembleFile {
 	    if ($loc >= 0776 or $mem[$loc]) { goto MemERR1; }
 	    $mem[$loc] = ($byte0 & 0177) if $pass != 1;
 	    $loc++;
+	} elsif (defined $locn) {
+	    $loc = $locn;
 	}
 	goto Retry;
       MemERR0:
@@ -831,7 +842,7 @@ sub assembleFile {
 	warn "*** ERROR: LOC $num has already been initialised with code or data\n";
 	$errFlag++ if $pass;
       Retry:
-	$str = $dval = $val = undef;
+	$locn = $blk = $str = $dval = $val = undef;
 	if ($pass == 0) {
 	    if ($state == 0) {
 		printf "	";
@@ -840,6 +851,8 @@ sub assembleFile {
 	    }
 	}
     }
+    use warnings 'deprecated';
+    use warnings;
 } # assembleFile
 
 ########################################################################
@@ -878,10 +891,6 @@ sub run {
 		printf "watch point mr = %03o at pc = %03o\n", $mr, $pc;
 		$loc = $mr;
 		debug(2, $op, $mr);
-		if ($abort) {
-		    $abort = 0;				# set in debug()
-		    return;
-		}
 	    }
 	    last unless $num & 01000;
 	    if ($op < 010) {
@@ -902,10 +911,10 @@ sub run {
 	    printf "break point at pc = %03o\n", $pc;
 	    $loc = $pc;
 	    debug(1, $op, $mr);
-	    if ($abort) {
-		$abort = 0;				# set in debug()
-		return;
-	    }
+	}
+	if ($abort) {
+	    $abort = 0;					# set in debug() or KEY input instructions
+	    return;
 	}
 	#### trace #############################################################
 	if ($opt_l) {
@@ -1129,7 +1138,7 @@ sub KDN {		# 060000
     print "\n";
   RepeatKDN:
     $_ = $term->readline("Enter a short number: ");
-    if (not defined $_) { print "\n"; exit; }	# ctrl D
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
     $jtA = +$_;
     $jtA = oct $jtA if $jtA =~ m/^0/;
     if ($jtA > 077777 or $jtA < ~037777) {
@@ -1143,7 +1152,7 @@ sub KDD {		# 062000
     print "\n";
   RepeatKDD:
     $_ = $term->readline("Enter a long number: ");
-    if (not defined $_) { print "\n"; exit; }	# ctrl D
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
     $jtA = +$_;
     $jtA = oct $jtA if $jtA =~ m/^0/;
     if ($jtA > 07777777777 or $jtA < ~03777777777) {
@@ -1157,7 +1166,7 @@ sub KDD {		# 062000
 sub KCH {		# 064000
     ReadMode('cbreak');
     my $byte = ReadKey(0);			# single character from keyboard (stdin)
-    if (not defined $byte or ord($byte) == 04) { ReadMode('normal'); print "\n"; exit; }	# ctrl C or ctrl D
+    if (not defined $byte or ord($byte) == 04) { ReadMode('normal'); print "\n"; $abort = 1; return; }	# ctrl D
     print $byte;			# echo
     $jtA = $mem[$mr] = ord $byte;
     ReadMode('normal');
@@ -1167,7 +1176,7 @@ sub KCS {		# 066000
     my ($num, $byte, $byte0, $bs);
     print "\n";
     $_ = $term->readline("Enter a text string: ");
-    if (not defined $_) { print "\n"; exit; }	# ctrl D
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
     $byte0 = $bs = $jtA = 0;
     foreach $byte (split //, $_) {
 	$jtA = 1 if $byte ne "0";
