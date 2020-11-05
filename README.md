@@ -3,8 +3,8 @@ Beginners Assembly Language and Debugger
 
 INTRODUCTION
 
-Balad is an assembly level programming language for an emulated virtual computer with a 15 bit word length. It is combined with a comprehensive Debugging system which allows on line program assembly, execution of programs and the insertion of breakpoints to allow suspension of programs during execution.
-Instructions are machine oriented, using integer and logical operations only. As a concession to the beginner, extra input/output instructions are provided for automatic Decimal to Binary conversion and the printing of Text Strings. These facilities will enable students to obtain reasonable print out of their results quickly, while concentrating their efforts on developing algorithms.
+Balad is an assembly level programming language for an emulated virtual computer with a 15 bit word length. It is combined with a comprehensive debugging system which allows on line program assembly, execution of programs and the insertion of breakpoints to allow suspension of programs during execution.
+Instructions are machine oriented, using integer and logical operations only. As a concession to the beginner extra instructions are provided for single character, decimal number as well as text string input and output. These facilities will enable students to obtain reasonable displays of their results quickly, while concentrating their efforts on developing algorithms.
 
 THE BALAD COMPUTER
 
@@ -17,4 +17,4 @@ The Balad system was developed in 1970 as an aid for teaching electronics techni
 The details can easily be taught in one 45 minute lesson and from then on students can test their own skills in manipulating machine instructions to develop higher level functionality, like a multiply routine, which is not part of the basic instructions set.
 HINT: a very simple multiply algorithm is to add the multiplicand to the accumulator and decrement the multiplier in a loop. Terminate the loop  when the multiplier is zero.
 
-$Id: README.md 1.2 $
+$Id: README.md 1.3 $

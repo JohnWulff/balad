@@ -1,3 +1,5 @@
+#!/usr/bin/balad
+;	$Id: enterCS.bl 1.1 $
 	LOC 760
 tmp:	BLK 13
 

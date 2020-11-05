@@ -1,3 +1,5 @@
+#!/usr/bin/balad
+;	$Id: KDD.bl 1.1 $
 LOC 10
 5l
 7l
@@ -13,10 +15,14 @@ JZR 114
 CLR 777
 LDA 10
 ADD 12
+STA 14
+LDA 11
+ADD 13
+STA 15
 PRF 20
 ADR 10
 ADR 12
-ADR 0
+ADR 14
 JMP 100
 HLT
 

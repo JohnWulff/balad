@@ -1,6 +1,7 @@
+#!/usr/bin/balad
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  $Id: mulsub.bal 1.1 $
+;  $Id: mulinc.bl 1.2 $
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -39,48 +40,37 @@ quit:	HLT
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  Simple multiply subroutine using rotate right of the multiplyer and
-;  repeated addition of the left shifted multiplicand for every bit of
-;  the multiplyer
+;  Simple multiply subroutine using decrement of multiplyer and
+;  repeated addition of multiplicand until multiplyer is zero
 ;  JMS 200
 ;  ADR xx	; address of single precision multiplicand
-;  ADR yy	; address of single precision multiplier
+;  ADR yy	; address of single precision multiplyer
 ;  next		; double precision result in ACC (adr 0 and 1)
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	LOC 2		; temporary variables
+	LOC 1		; temporary variables
+L1:	0
 L2:	0
 L3:	0
-L4:	0
-L5:	0
 
 	LOC 200
 multiply: 0		; return address
 	LDA @multiply
 	INC multiply
 	LDA @ACC
-	STA L2		; lo part of multiplicand
-	CLR L3		; hi part of multiplicand (filled during left shift)
+	STA L2		; multiplicand
 	LDA @multiply
 	INC multiply
 	LDA @ACC
-	STA L4		; multiplyer
-	CLR ACC		; lo part of result
-	CLR L1		; hi part of result
-loop:  	TST L4		; is multiplyer all 0's ?
-	JZR @multiply	; yes - return
+	STA L3		; multiplyer
+	CLR ACC
+	CLR L1
+	TST L3
+loop:	JZR @multiply	; return if multiplyer is zero
 	CLR C
-	ROR L4
+	ADD L2		; add multiplicand to lo result
 	JZC skip
-	CLR C
-	ADD L2
-	STA L5		; save ACC
-	LDA L1
-	ADD L3		; add shifted hi part to hi result
-	STA L1
-	LDA L5		; restore ACC
-skip:	CLR C
-	ROL L2
-	ROL L3		; double precision shift left of multiplicand
+	INC L1		; increment hi result
+skip:	DEC L3		; decrement multiplyer
 	JMP loop

@@ -1,13 +1,14 @@
+#!/usr/bin/balad
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  $Id: nestedJMs.bal 1.1 $
+;  $Id: nestedJMS.bl 1.2 $
 ;
 ;  Test Balad u - until feature with nested JMS subroutines
 ;    NOTE: it is not possible to call subroutines recursively in BALAD
 ;          unless special stack is implemented (same as PDP-8)
 ;
 ;  set a breakpoint at location break (204)
-;  >> 204b
+;  >> 204*
 ;  hit any key	0 1 2 3 4
 ;  		break point at pc = 204
 ;  !> u		break point at pc = 165

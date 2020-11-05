@@ -1,14 +1,42 @@
+#!/usr/bin/balad
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  mulfunc.bal	J.E. Wulff 11 Oct 2020
+;  $Id: mulsub.bl 1.2 $
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	LOC 2		; temporary variables
-L2:	0
-L3:	0
-L4:	0
-L5:	0
+	LOC 10		; temporary variables
+xx:	0
+yy:	0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;  Format string for PRF command
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 20
+fmt:	"%d * %d = %ld\n"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;  Main program calling JMS multiply
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 100
+main:	KDN xx		; Enter multiplicand
+	JZR quit	;   quit program if zero
+	KDN yy		; Enter mmultiplyer
+	JMS multiply
+	ADR xx
+	ADR yy
+	PRF fmt		; print "xx * yy = result\n"
+	ADR xx
+	ADR yy
+	ADR ACC
+	JMP main
+quit:	HLT
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
@@ -17,10 +45,17 @@ L5:	0
 ;  the multiplyer
 ;  JMS 200
 ;  ADR xx	; address of single precision multiplicand
-;  ADR yy	; address of single precision multiplyer
-:  next		; double precision result in ACC (adr 0 and 1)
+;  ADR yy	; address of single precision multiplier
+;  next		; double precision result in ACC (adr 0 and 1)
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 1		; temporary variables
+L1:	0
+L2:	0
+L3:	0
+L4:	0
+L5:	0
 
 	LOC 200
 multiply: 0		; return address

@@ -1,7 +1,0 @@
-LOC 10
-"xx\n"
-
-LOC 100
-PRF 10
-HLT
-

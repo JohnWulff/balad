@@ -1,6 +1,7 @@
+#!/usr/bin/balad
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  $Id: compare.bal 1.1 $
+;  $Id: compare.bl 1.2 $
 ;
 ;  Check the CMP instruction with JLT, JGE etc in the BALAD run time
 ;

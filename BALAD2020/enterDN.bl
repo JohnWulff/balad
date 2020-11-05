@@ -1,3 +1,5 @@
+#!/usr/bin/balad
+;	$Id: enterDN.bl 1.1 $
 	LOC 10
 tmp:	BLK 1
 	LOC 100

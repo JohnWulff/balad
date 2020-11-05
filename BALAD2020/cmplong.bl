@@ -1,6 +1,7 @@
+#!/usr/bin/balad
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  $Id: cmplong.bal 1.1 $
+;  $Id: cmplong.bl 1.2 $
 ;
 ;  Check the CMP instruction with JLT, JGE etc in the BALAD run time
 ;

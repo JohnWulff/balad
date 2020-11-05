@@ -1,3 +1,5 @@
+#!/usr/bin/balad
+;	$Id: KCS.bl 1.1 $
 LOC 20
 "\n"
 "q"

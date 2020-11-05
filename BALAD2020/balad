@@ -5,9 +5,24 @@
 #	Copyright (C) 2020  John E. Wulff
 #
 #   You may distribute under the terms of either the GNU General Public
-#   License or the Artistic License, as specified in the README file.
+#   License or the Artistic License, as specified in the next line.
 #
-#	BALAD assembler and interpreter
+#	SPDX-License-Identifier: GPL-3.0+ OR Artistic-2.0
+#
+#	BALAD assembler, interpreter and debugger
+#
+#   Balad is an assembly level programming language for an emulated
+#   virtual computer with a 15 bit word length. It is combined with a
+#   comprehensive debugging system which allows on line program assembly,
+#   execution of programs and the insertion of breakpoints to allow
+#   suspension of programs during execution.
+#
+#   Instructions are machine oriented, using integer and logical
+#   operations only. As a concession to the beginner extra instructions
+#   are provided for single character, decimal number as well as text
+#   string input and output. These facilities will enable students to
+#   obtain reasonable displays of their results quickly, while
+#   concentrating their efforts on developing algorithms.
 #
 ########################################################################
 
@@ -16,236 +31,368 @@ use integer;
 use warnings;
 use Term::ReadKey;
 use Term::ReadLine;
+$| = 1;				# output stdout buffer for every print or printf
 
 ########################################################################
 #
 #	Opcodes	- Hash used during assembly
+#	    $opCodes{KEY}[0]	$instr ($op = $instr >> 10)
+#	    $opCodes{KEY}[1]	may operate on carry for this KEY
 #
 ########################################################################
 
-my %opCodes = (
-	JMP	=> [ 000000, 1, ],	ADR	=> [ 000000, 1, ],
-	JMS	=> [ 002000, 1, ],	# may not JMP to carry
-	JZR	=> [ 004000, 1, ],	JEQ	=> [ 004000, 1, ],
-	JNR	=> [ 006000, 1, ],	JNE	=> [ 006000, 1, ],
+my %opCodes = (    # $instr  c                       $instr  c            $op
+	JMP	=> [ 000000, 1, ],	ADR	=> [ 000000, 1, ],	#  0
+	JMS	=> [ 002000, 1, ],	# may not JMP to carry		#  1
+	JZR	=> [ 004000, 1, ],	JEQ	=> [ 004000, 1, ],	#  2
+	JNR	=> [ 006000, 1, ],	JNE	=> [ 006000, 1, ],	#  3
 
-	JZC	=> [ 010000, 1, ],	JLT	=> [ 010000, 1, ],
-	JNC	=> [ 012000, 1, ],	JGE	=> [ 012000, 1, ],
-	JEZ	=> [ 014000, 1, ],	JLE	=> [ 014000, 1, ],
-	JBN	=> [ 016000, 1, ],	JGT	=> [ 016000, 1, ],
+	JZC	=> [ 010000, 1, ],	JLT	=> [ 010000, 1, ],	#  4
+	JNC	=> [ 012000, 1, ],	JGE	=> [ 012000, 1, ],	#  5
+	JEZ	=> [ 014000, 1, ],	JLE	=> [ 014000, 1, ],	#  6
+	JBN	=> [ 016000, 1, ],	JGT	=> [ 016000, 1, ],	#  7
 
-	AND	=> [ 020000, 0, ],	# double operand ops can use carry
-	ADD	=> [ 022000, 0, ],
-	SUB	=> [ 024000, 0, ],
-	CMP	=> [ 026000, 0, ],
+	AND	=> [ 020000, 0, ],	# double operands can use carry	#  8
+	ADD	=> [ 022000, 0, ],					#  9
+	SUB	=> [ 024000, 0, ],					# 10
+	CMP	=> [ 026000, 0, ],					# 11
 
-	LDA	=> [ 030000, 0, ],	# may load carry
-	STA	=> [ 032000, 0, ],	# may operate on carry
-	CLR	=> [ 034000, 0, ],	# may operate on carry
-	TST	=> [ 036000, 0, ],	# may test carry
+	LDA	=> [ 030000, 0, ],	# may load carry		# 12
+	STA	=> [ 032000, 0, ],	# may operate on carry		# 13
+	CLR	=> [ 034000, 0, ],	# may operate on carry		# 14
+	TST	=> [ 036000, 0, ],	# may test carry		# 15
 
-	COM	=> [ 040000, 0, ],
-	NEG	=> [ 042000, 1, ],
-	INC	=> [ 044000, 1, ],
-	DEC	=> [ 046000, 1, ],
+	COM	=> [ 040000, 0, ],	# may complement carry		# 16
+	NEG	=> [ 042000, 1, ],	# inhibit operation on carry	# 17
+	INC	=> [ 044000, 1, ],					# 18
+	DEC	=> [ 046000, 1, ],					# 19
 
-	ROL	=> [ 050000, 1, ],
-	ROR	=> [ 052000, 1, ],
-	ASR	=> [ 054000, 1, ],
-	SWP	=> [ 056000, 1, ],	# inhibit operation on carry
+	ROL	=> [ 050000, 1, ],					# 20
+	ROR	=> [ 052000, 1, ],					# 21
+	ASR	=> [ 054000, 1, ],					# 22
+	SWP	=> [ 056000, 1, ],					# 23
 
-	KDN	=> [ 060000, 1, ],
-	KDD	=> [ 062000, 1, ],
-	KCH	=> [ 064000, 1, ],
-	KCS	=> [ 066000, 1, ],
+	KDN	=> [ 060000, 1, ],					# 24
+	KDD	=> [ 062000, 1, ],					# 25
+	KCH	=> [ 064000, 1, ],					# 26
+	KCS	=> [ 066000, 1, ],					# 27
 
-	PDN	=> [ 070000, 0, ],	TDN	=> [ 070000, 0, ],	# may print carry
-	PDD	=> [ 072000, 1, ],	TDD	=> [ 072000, 1, ],
-	PCH	=> [ 074000, 0, ],	TCH	=> [ 074000, 0, ],	# may print carry
-	PRF	=> [ 076000, 1, ],	TCS	=> [ 076000, 1, ],
+	PDN	=> [ 070000, 0, ],	TDN	=> [ 070000, 0, ],	# 28  may print carry
+	PDD	=> [ 072000, 1, ],	TDD	=> [ 072000, 1, ],	# 29
+	PCH	=> [ 074000, 0, ],	TCH	=> [ 074000, 0, ],	# 30  may print carry
+	PRF	=> [ 076000, 1, ],	TCS	=> [ 076000, 1, ],	# 31
 );
 
 ########################################################################
 #
-#	Opcodes	- Array of OpCode names for disassembly listing
+#	Three arrays accessed by op code 0 - 31 (0 - 037)
+#
+#	    $opNames[op]	op code NAME for disassembly
+#	    $opSubs[op]		op code subroutine reference
+#	    $opTrace[op]	trace C ACC and [mem] for this op code
+#	    $ocTrace[op]	trace C ACC and [mem] for instr before conditional jmp
+#
+#	These are implemented as four separate arrays for speed, since
+#	@opSubs, @opTrace and @ocTrace are accessed for each instruction execution
 #
 ########################################################################
 
-my @opNames = (
-	"JMP",	# 000000
-	"JMS",	# 002000
-	"JZR",	# 004000
-	"JNR",	# 006000
-                        
-	"JZC",	# 010000
-	"JNC",	# 012000
-	"JEZ",	# 014000
-	"JBN",	# 016000
-                        
-	"AND",	# 020000
-	"ADD",	# 022000
-	"SUB",	# 024000
-	"CMP",	# 026000
-                        
-	"LDA",	# 030000
-	"STA",	# 032000
-	"CLR",	# 034000
-	"TST",	# 036000
-                        
-	"COM",	# 040000
-	"NEG",	# 042000
-	"INC",	# 044000
-	"DEC",	# 046000
-                        
-	"ROL",	# 050000
-	"ROR",	# 052000
-	"ASR",	# 054000
-	"SWP",	# 056000
-                        
-	"KDN",	# 060000
-	"KDD",	# 062000
-	"KCH",	# 064000
-	"KCS",	# 066000
-                        
-	"PDN",	# 070000
-	"PDD",	# 072000
-	"PCH",	# 074000
-	"PRF",	# 076000
+my @opNames = ( # $instr $op
+	"JMP",	# 000000  0
+	"JMS",	# 002000  1
+	"JZR",	# 004000  2
+	"JNR",	# 006000  3
+                           
+	"JZC",	# 010000  4
+	"JNC",	# 012000  5
+	"JEZ",	# 014000  6
+	"JBN",	# 016000  7
+                           
+	"AND",	# 020000  8
+	"ADD",	# 022000  9
+	"SUB",	# 024000 10
+	"CMP",	# 026000 11
+                           
+	"LDA",	# 030000 12
+	"STA",	# 032000 13
+	"CLR",	# 034000 14
+	"TST",	# 036000 15
+                           
+	"COM",	# 040000 16
+	"NEG",	# 042000 17
+	"INC",	# 044000 18
+	"DEC",	# 046000 19
+                           
+	"ROL",	# 050000 20
+	"ROR",	# 052000 21
+	"ASR",	# 054000 22
+	"SWP",	# 056000 23
+                           
+	"KDN",	# 060000 24
+	"KDD",	# 062000 25
+	"KCH",	# 064000 26
+	"KCS",	# 066000 27
+                           
+	"PDN",	# 070000 28
+	"PDD",	# 072000 29
+	"PCH",	# 074000 30
+	"PRF",	# 076000 31
 );
 
-########################################################################
-#
-#	Opcodes	- Array of subroutine references used during execution
-#
-########################################################################
-
-my @opSubs = (
-	\&JMP,	# 000000
-	\&JMS,	# 002000
-	\&JZR,	# 004000
-	\&JNR,	# 006000
-                        
-	\&JZC,	# 010000
-	\&JNC,	# 012000
-	\&JEZ,	# 014000
-	\&JBN,	# 016000
-                        
-	\&AND,	# 020000
-	\&ADD,	# 022000
-	\&SUB,	# 024000
-	\&CMP,	# 026000
-                        
-	\&LDA,	# 030000
-	\&STA,	# 032000
-	\&CLR,	# 034000
-	\&TST,	# 036000
-                        
-	\&COM,	# 040000
-	\&NEG,	# 042000
-	\&INC,	# 044000
-	\&DEC,	# 046000
-                        
-	\&ROL,	# 050000
-	\&ROR,	# 052000
-	\&ASR,	# 054000
-	\&SWP,	# 056000
-                        
-	\&KDN,	# 060000
-	\&KDD,	# 062000
-	\&KCH,	# 064000
-	\&KCS,	# 066000
-                        
-	\&PDN,	# 070000
-	\&PDD,	# 072000
-	\&PCH,	# 074000
-	\&PRF,	# 076000
+my @opSubs = (  # $instr $op
+	\&JMP,	# 000000  0
+	\&JMS,	# 002000  1
+	\&JZR,	# 004000  2
+	\&JNR,	# 006000  3
+                           
+	\&JZC,	# 010000  4
+	\&JNC,	# 012000  5
+	\&JEZ,	# 014000  6
+	\&JBN,	# 016000  7
+                           
+	\&AND,	# 020000  8
+	\&ADD,	# 022000  9
+	\&SUB,	# 024000 10
+	\&CMP,	# 026000 11
+                           
+	\&LDA,	# 030000 12
+	\&STA,	# 032000 13
+	\&CLR,	# 034000 14
+	\&TST,	# 036000 15
+                           
+	\&COM,	# 040000 16
+	\&NEG,	# 042000 17
+	\&INC,	# 044000 18
+	\&DEC,	# 046000 19
+                           
+	\&ROL,	# 050000 20
+	\&ROR,	# 052000 21
+	\&ASR,	# 054000 22
+	\&SWP,	# 056000 23
+                           
+	\&KDN,	# 060000 24
+	\&KDD,	# 062000 25
+	\&KCH,	# 064000 26
+	\&KCS,	# 066000 27
+                           
+	\&PDN,	# 070000 28
+	\&PDD,	# 072000 29
+	\&PCH,	# 074000 30
+	\&PRF,	# 076000 31
 );
 
-my $loc		= 0100;		# first default location
-my $state	= 0;		# 0 none  1 data  2 code
-my ($pc, $mr, $tmp, $jtA, $jtC, $listMode, $listOfs, $abort);
+my @opTrace = ( # $instr $op
+	0,	# 000000  0	JMP	no trace
+	1,	# 002000  1	JMS	trace before and after execution
+	0,	# 004000  2	JZR
+	0,	# 006000  3	JNR
+                                           
+	0,	# 010000  4	JZC
+	0,	# 012000  5	JNC
+	0,	# 014000  6	JEZ
+	0,	# 016000  7	JBN
+                                           
+	1,	# 020000  8	AND
+	1,	# 022000  9	ADD
+	1,	# 024000 10	SUB
+	1,	# 026000 11	CMP
+                                           
+	1,	# 030000 12	LDA
+	1,	# 032000 13	STA
+	1,	# 034000 14	CLR
+	1,	# 036000 15	TST
+                                           
+	1,	# 040000 16	COM
+	1,	# 042000 17	NEG
+	1,	# 044000 18	INC
+	1,	# 046000 19	DEC
+                                           
+	1,	# 050000 20	ROL
+	1,	# 052000 21	ROR
+	1,	# 054000 22	ASR
+	1,	# 056000 23	SWP
+                                           
+	1,	# 060000 24	KDN
+	1,	# 062000 25	KDD
+	1,	# 064000 26	KCH
+	1,	# 066000 27	KCS
+                                           
+	0,	# 070000 28	PDN
+	0,	# 072000 29	PDD
+	0,	# 074000 30	PCH
+	0,	# 076000 31	PRF
+);
 
-my @mem		= (0) x 01000;	# BALAD memory 0 - 777 initialised to 0 (HLT)
-my @breaks	= (0) x 01000;	# BALAD breaks 0 - 777 initialised to 0
+my @ocTrace = ( # $instr $op
+	0,	# 000000  0	JMP
+	0,	# 002000  1	JMS
+	1,	# 004000  2	JZR	trace instruction before conditional jmp
+	1,	# 006000  3	JNR
+                                           
+	1,	# 010000  4	JZC
+	1,	# 012000  5	JNC
+	1,	# 014000  6	JEZ
+	1,	# 016000  7	JBN
+                                           
+	0,	# 020000  8	AND
+	0,	# 022000  9	ADD
+	0,	# 024000 10	SUB
+	0,	# 026000 11	CMP
+                                           
+	0,	# 030000 12	LDA
+	0,	# 032000 13	STA
+	0,	# 034000 14	CLR
+	0,	# 036000 15	TST
+                                           
+	0,	# 040000 16	COM
+	0,	# 042000 17	NEG
+	0,	# 044000 18	INC
+	0,	# 046000 19	DEC
+                                           
+	0,	# 050000 20	ROL
+	0,	# 052000 21	ROR
+	0,	# 054000 22	ASR
+	0,	# 056000 23	SWP
+                                           
+	0,	# 060000 24	KDN
+	0,	# 062000 25	KDD
+	0,	# 064000 26	KCH
+	0,	# 066000 27	KCS
+                                           
+	1,	# 070000 28	PDN	trace instruction before print instructions
+	1,	# 072000 29	PDD
+	1,	# 074000 30	PCH
+	0,	# 076000 31	PRF	leave out print string
+);
+
+my @mem		= (0) x 01001;	# BALAD memory 0 - 777 initialised to 0 (HLT)
+my @breaks	= (0) x 01001;	# BALAD breaks 0 - 777 initialised to 0
 my $break	= 0;		# break at every instuction step when set
+my $running	= 0;		# 0 not running 1 running not at break point 2 running at break
 my $jmsCall	= 0;		# address of current JMS subroutine
 my @jmsStack	= ();		# stack of JMS calls
 my %comments	= ();
-my %symTable	= ( ACC => 0, L1 => 1, C => 0777 );	# define addresses of accumulator, L1 and carry
-my %symbols	= ( 0 => "ACC", 1 => "L1", 511 => "C" ); # define inverse symbols
+my %symTable	= ( ACC => 0, C => 0777 );	# define names of accumulator and carry
+my %symbols	= ( 0 => "ACC", 511 => "C" );	# define inverse symbols
+my %cntrl_slash	= (		# forward control character translation
+	"\a"	=> "\\a",	# BEL	alarm
+	"\b"	=> "\\b",	# BS	back space
+	"\t"	=> "\\t",	# HT	horizontal tab
+	"\n"	=> "\\n",	# LF	new line
+	"\f"	=> "\\f",	# FF	form feed
+	"\r"	=> "\\r",	# CR	carriage return
+	"\e"	=> "\\e",	# ESC
+);
+my %ascii_cntrl	= (		# inverse translation ascii following '\'
+	"a"	=> "\a",	# BEL	alarm
+	"b"	=> "\b",	# BS	back space
+	"t"	=> "\t",	# HT	horizontal tab
+	"n"	=> "\n",	# LF	new line
+	"f"	=> "\f",	# FF	form feed
+	"r"	=> "\r",	# CR	carriage return
+	"e"	=> "\e",	# ESC
+);
+my @debPrompts	= ( ">>", "B>", "W>" );			# debug() entry prompts
 
 my $named = $0;
 $named =~ s#.*[/\\]##;		# delete directory names in path
 my @argv = ();
 my @argv2 = ();
-my $argv;
+my ($argv,$loc, $state, $pc, $mr, $tmp, $jtA, $jtC, $listMode, $listOfs, $abort, $cmr);
 
 format STDERR =
-Usage:	@<<<<[ -lh][ balad_source_file ...]
-	$named
-	-l	list code output during assembly and execution
-	  -d	additionally list C, ACC, L1 and MR in decimal
-	  -o	additionally list C, ACC, L1 and MR in octal
-	  -x	additionally list C, ACC, L1 and MR in hexadecimal
-	  -b	additionally list C, ACC, L1 and MR in binary
-		in each case show values before and after execution
-	-c	assembly only - no execution
-	-m	show execution time in microsecond resolution
-	-h	help, ouput this Usage text only
-	any file ending in .lst is interpreted as a list of files.
-	After successful assembly enter the debugger (prompt >>)
-    >> enter a debug command at main entry
-	The run or enter command can only be called before run
-    r or <n>r  run code from octal address <n> (default 100)
-    e	   enter new or revised code or data interactively
-	   terminate entry with ctrl D (EOF)
+Usage:  @<<<<[ -l[doxb]cm][ <source_file> ...]|[ -h]
+        $named
+        -l      list code output during assembly and execution
+          -d    additionally list C, ACC and MR in decimal
+          -o    additionally list C, ACC and MR in octal
+          -x    additionally list C, ACC and MR in hexadecimal
+          -b    additionally list C, ACC and MR in binary
+                in each case show values before and after execution
+            can also be applied at run time as debug commands
+        -c      assembly only - no execution
+        -m      show execution time in microsecond resolution
+        -h      help, ouput this Usage text only
+        <source_file>  one or more balad source files (ext .bl).
+        Any file with ext .lst is interpreted as a list of files.
+$Id: balad 1.3 $
 
-    !> enter a debug command at a break
-	The following commands can only be called at a break
-    n	   execute NEXT instruction skipping over JMS subroutines
-    s	   execute next, STEP into JMS subroutines
-    u	   continue execution UNTIL stepping out of subroutine
-    c	   CONTINUE execution until next break or watch point
-    a	   abort the current program - allow new run or enter
+        After successful assembly the program starting at 'main' 
+        if defined is run - else enter the Debugger (prompt >>).
+        If there is no <source> file enter code interactively.
 
-	All other commands can be used in either mode.
-    b	      set a BREAK or watch point at current location
-    <n>b      set a BREAK or watch point at octal location <n>
-    <n>,<m>b  set BREAK or watch points at octal locations <n> to <m>
-    C	      CLEAR a break or watch point at current location
-    <n>C      CLEAR a break or watch point at octal location <n>
-    <n>,<m>C  CLEAR break or watch points at octal locations <n> to <m>
-    B	      list all break or watch points in current list mode
-    <n>,<m>B  list break or watch points in range <n> to <m>
-
-	List commands show an octal memory address and the contents
-    lc	      list code at current location
-    <n>lc     list code at octal location <n>
-    <n>,<m>lc list code at octal locations <n> to <m>
-
-	Similarly for
-    ld	      list short signed decimal
-    lu	      list short unsigned decimal
-    lo	      list short unsigned octal
-    lx	      list short unsigned hexadecimal
-    lb	      list short unsigned binary
-    lD	      list long signed decimal
-    lU	      list long unsigned decimal
-    lO	      list long unsigned octal
-    lX	      list long unsigned hexadecimal
-    lB	      list long unsigned binary
-    ls	      list text string up to next NULL
-    l	      list location(s) in current list mode
-$Id: balad 1.2 $
 .
 
-use vars qw($opt_l $opt_d $opt_o $opt_x $opt_b $opt_c $opt_m $opt_T $opt_h);
+format STDOUT =
+ Debugger
+    Locations <n> or <m> may be an octal number or
+        a defined address label [+/- a decimal offset] or
+        . [+/- a decimal offset], where . is the current location
+
+ >> enter a debug command when program is not running
+        The run or enter command can only be called at >>
+    r      run code from address 'main' if defined - else 0100
+    <n>r   run code from address <n>
+    e      enter new or revised code or data interactively
+           terminate entry with key q or ctrl D (EOF)
+
+ B> enter a debug command at a break point
+ W> enter a debug command at a watch point
+        The following commands can only be called at a break
+        or watch point of an interrupted running program
+    s      STEP to next instruction, entering into JMS subroutines
+    n      execute NEXT instruction skipping over JMS subroutines
+    u      continue execution UNTIL leaving current subroutine
+    c      CONTINUE execution until next break or watch point
+    a      abort the current program - allow new run or enter
+
+        All other commands can be called in either mode.
+    q         QUIT balad
+    h         output this HELP text
+    *         set a BREAK or watch point at current location
+    <n>*      set a BREAK or watch point at location <n>
+    <n>,<m>*  set BREAK or watch points at locations <n> to <m>
+    #         CLEAR all break or watch points
+    .#        CLEAR a break or watch point at current location
+    <n>#      CLEAR a break or watch point at location <n>
+    <n>,<m>#  CLEAR break or watch points at locations <n> to <m>
+    =         list all break or watch points in current list mode
+    <n>,<m>=  list break or watch points in range <n> to <m>
+    < <code>  assemble <code> or <data> at current location
+    <n>< <code>  assemble <code> or <data> at location <n>
+
+        List commands show an octal memory address and the contents
+    /c        list code at current location
+    <n>/c     list code at location <n>
+    <n>,<m>/c list code at locations <n> to <m>
+
+        Similarly for different list modes
+    /d    short signed decimal       /D    long signed decimal  
+    /u    short unsigned decimal     /U    long unsigned decimal
+    /o    short unsigned octal       /O    long unsigned octal
+    /x    short unsigned hexadecimal /X    long unsigned hexadecimal
+    /b    short unsigned binary      /B    long unsigned binary
+    /s    text string up to next NULL
+        these apply to all other commands starting at * (set a BREAK)
+    / or enter    list location(s) in current list mode
+
+    -     stop listing code output during execution
+    -l    list code output during execution
+      -d  additionally  trace C, ACC and MR in decimal
+      -o  alternatively trace C, ACC and MR in octal
+      -x  alternatively trace C, ACC and MR in hexadecimal
+      -b  alternatively trace C, ACC and MR in binary
+          In each case trace values before and after execution.
+          Without -l trace only at break or watch points.
+.
+
+use vars qw($opt_l $opt_o $opt_d $opt_x $opt_b $opt_c $opt_m $opt_T $opt_h);
 use Getopt::Long qw(:config no_ignore_case bundling);
 GetOptions (
     '<>'  => sub { push(@argv, @_); },	# Transfer file argument to @argv
     'l'   => \$opt_l,
-    'd'   => \$opt_d,
     'o'   => \$opt_o,
+    'd'   => \$opt_d,
     'x'   => \$opt_x,
     'b'   => \$opt_b,
     'c'   => \$opt_c,
@@ -253,19 +400,34 @@ GetOptions (
     'T'   => \$opt_T,
     'h'   => \$opt_h,
 );
+my $optlx =  $opt_l && ($opt_o || $opt_d || $opt_x || $opt_b);
+my $optnx = !$opt_l && ($opt_o || $opt_d || $opt_x || $opt_b);
+my ($opttx, $traceFormat);
+if ($opt_o) {
+    $traceFormat = "%sC %d ACC %05o [%03o] %05o";	# octal has precedence
+} elsif ($opt_d) {
+    $traceFormat = "%sC %d ACC %5d [%03o] %5d";
+} elsif ($opt_x) {
+    $traceFormat = "%sC %d ACC %04x [%03o] %04x";
+} elsif ($opt_b) {
+    $traceFormat = "%sC %d ACC %015b [%03o] %015b";
+}
 
 if ($opt_h) {
-    write STDERR; exit 0;	# -h, ouput Usage only
+    write STDERR; write STDOUT; exit 0;	# -h, ouput Usage only
 }
 
 if ($opt_m) {
     use Time::HiRes qw(gettimeofday);
 }
 
-my $errFlag = 0;
+my $eF = 0;
 my $term = Term::ReadLine->new('balad');
+$SIG{QUIT} = \&interrupt;	# signal 3	(ctrl-\ interrupt from keyboard)
+$SIG{PIPE} = \&interrupt;	# signal 13
 
 # Pass 1 - process labels only
+my $filesAssd	= 0;		# number of BALAD source files assembled
 $loc = 0100;			# first default location
 while ($argv = shift @argv) {
     unless (open (IN, $argv)) {
@@ -274,12 +436,13 @@ while ($argv = shift @argv) {
     }
     if ($argv =~ /\.lst$/) {	# x.lst is a list of filenames
 	while (<IN>) {		# read next entry from x.lst into $_
-	    chop;		# $_ is a filname entry out of x.lst
+	    chomp;		# $_ is a filname entry out of x.lst
 	    push(@argv, $_);	# put next filename on end of @argv
 	}
     } else {
 	push(@argv2, $argv);	# file list for pass 2
-	assembleFile(1);	# Pass 1
+	$eF += assembleFile(1);	# Pass 1
+	$filesAssd++;
     }
     close(IN);
 }
@@ -291,12 +454,14 @@ while ($argv = shift @argv2) {
 	warn "can't open input file $argv";
 	next;
     }
-    assembleFile(2);		# Pass 2
+    print STDERR "$argv\n" if $filesAssd >= 2;
+    $eF += assembleFile(2);	# Pass 2
     close(IN);
 }
 
-if ($errFlag) {
-    warn "*** ERROR: $errFlag errors during assembly - cannot run\n";
+if ($eF) {
+    my $s = $eF >= 2 ? "s" : "";
+    warn "*** ERROR: $eF error$s during assembly - cannot run\n";
 } elsif (not $opt_c) {
     ########################################################################
     #   Enter run and debugging commands
@@ -306,208 +471,50 @@ if ($errFlag) {
     $listOfs  = 1;		# list offset is 1
     debug(0);
 }
+### End of Perl main ########################################################
 
 ########################################################################
 #
-#  Debugger
-#    arg1: 0 called from main program
-#          1 called from a break
-#          2 called from a watch point
-#
-#    >> enter a debug command at main
-#		The run or enter command can only be called when arg1 == 0.
-#	r or <n>r  run code from octal address <n> (default 100)
-#	e	   enter new or revised code or data interactively
-#
-#    !> enter a debug command at a break
-#		The following commands can only be called at a break when arg1 == 1
-#	n	   execute NEXT instruction skipping over JMS subroutines
-#	s	   execute next, STEP into JMS subroutines
-#	u	   continue execution UNTIL stepping out of subroutine
-#	c	   CONTINUE execution until next break or watch point
-#	a	   abort the current program - allow new run or enter
-#
-#		All other commands can be used in either mode.
-#	b	   set a BREAK or watch point at current location
-#	<n>b	   set a BREAK or watch point at octal location <n>
-#	<n>,<m>b   set BREAK or watch points at octal locations <n> to <m>
-#	C	   CLEAR all break or watch points
-#	.C	   CLEAR a break or watch point at current location
-#	<n>C	   CLEAR a break or watch point at octal location <n>
-#	<n>,<m>C   CLEAR break or watch points at octal locations <n> to <m>
-#	B	   list all break or watch points in current list mode
-#	<n>,<m>B   list break or watch points in range <n> to <m>
-#
-#		List commands show an octal memory address and the contents
-#	lc	   list code at current location
-#	<n>lc	   list code at octal location <n>
-#	<n>,<m>lc  list code at octal locations <n> to <m>
-#
-#	Similarly for
-#	ld	   list short signed decimal
-#	lu	   list short unsigned decimal
-#	lo	   list short unsigned octal
-#	lx	   list short unsigned hexadecimal
-#	lb	   list short unsigned binary
-#	lD	   list long signed decimal
-#	lU	   list long unsigned decimal
-#	lO	   list long unsigned octal
-#	lX	   list long unsigned hexadecimal
-#	lB	   list long unsigned binary
-#	ls	   list text string up to next NULL
-#	l	   list location(s) in current list mode
+#	Catch and report stray signals
 #
 ########################################################################
 
-sub debug {
-    my ($mode, $op, $mr) = @_;
-    my ($listCmd, $lstart, $lfin, $l, $brkStar);
-    while (defined($tmp = sprintf "%03o %s ", $loc, $mode ? "!>" : ">>") and	# always true
-	defined($_ = $term->readline("$tmp"))) {
-	if (not defined $_) { print "\n"; last; }	# ctrl D
-	if ($mode == 0) {
-	    ########################################################################
-	    #  entered debug after assembly or abort - run or enter more code
-	    ########################################################################
-	    if (m/^\s*([0-7]{0,3})\s*r$/) {
-		$pc = $1 ? oct $1 : 0100;	# <pc> run (default 0100 main)
-		print "\n";
-		run();
-		next;
-	    } elsif (m/^\s*e$/) {
-		unless (open (IN, "-")) {	# STDIN
-		    warn "can't open STDIN ???";
-		    last;
-		}
-		$argv = "-";			# enter more code or data
-		assembleFile(0);		# interactive pass 0
-		print("\n");
-		next;
-	    }
-	} else {
-	    ########################################################################
-	    #  entered from break in executing code (mode >= 1)
-	    #	s	step one instruction	- into JMS subroutine
-	    #	n	next instruction	- skip over JMS subroutine
-	    #	c	continue until next break or watch point
-	    #	u	until return out of current JMS subroutine
-	    #	a	abort execution		- back to main debug
-	    ########################################################################
-	    $break = 0;
-	    if (m/^\s*([sncua])$/) {
-		if ($1 eq "s") {		# single step
-		    $break = 1;
-		} elsif ($1 eq "n") {		# next unless JMS at a break point
-		    if ($op != 01 or $mode != 1) {
-			$break = 1;
-		    } else {
-			$jmsCall = $mr;		# defer breaks until return from this JMS
-		    }
-		} elsif ($1 eq "u") {		# run until return from current JMS
-		    $jmsCall = $jmsStack[$#jmsStack] if scalar @jmsStack;
-		} elsif ($1 eq "a") {		# abort execution
-		    $abort = 1;
-		}
-		return;				# continue
-	    }
-	}
-	########################################################################
-	#  rest can be called in all modes
-	########################################################################
-	if (m/^(\s*(\.?|([0-7]+))(\s*,\s*([0-7]+))?)?\s*([bCBl])([cduoxbDUOXBs])?$/) {
-	    ########################################################################
-	    #  list 1 or more memory locations in selected list mode
-	    ########################################################################
-	    $lstart = $lfin = $loc;
-	    $listCmd = $6;
-	    if (defined $1 and $1 ne "") {
-		if (defined $3) {
-		    $lstart = $lfin = oct $3;
-		}
-		if (defined $5) {
-		    $lfin = oct $5;
-		}
-	    } elsif ($listCmd eq "B" or $listCmd eq "C") {
-		$lstart = 0;			# full range for listing break points
-		$lfin   = 0777;
-	    }
-	    if ($lstart > $lfin) {
-		warn"??? listing range must be rising\n";
-		next;				# $loc unchanged
-	    }
-	    if ($lfin > 0777) {
-		warn"??? memory limit is octal 777\n";
-		next;				# $loc unchanged
-	    }
-	    if ($7) {
-		$listMode = $7;			# optionally change list mode
-		$listOfs = ($listMode =~ m/[DUOXB]/) ? 2 : 1;	# and offset
-	    }
-	    for ($l = $lstart; $l <= $lfin; $l += $listOfs) {
-		if ($listCmd eq "b") {
-		    $breaks[$l] = 1;		# set a break or watch point
-		} elsif ($listCmd eq "C") {
-		    $tmp = $breaks[$l];
-		    $breaks[$l] = 0;		# clear a break or watch point
-		    next if $tmp != 1;	#	skip unless break or watch point was set
-		} elsif ($listCmd eq "B") {
-		    next if $breaks[$l] != 1;	# skip unless break or watch point
-		}
-		$brkStar = $breaks[$l] ? "  *" : "";
-		printf "\t%03o%s\t", $l, $brkStar; # octal memory location and break *
-		$tmp = $mem[$l];
-		$tmp += ($mem[$l+1] << 15) if $listOfs == 2;
-		########################################################################
-		#  select list mode
-		########################################################################
-		if ($listMode eq 'c') {		# list as balad code
-		    my ($label, $sym, $opc, $ind, $m, $mref);
-		    $label = defined($sym = $symbols{$l}) ? sprintf("%s:", $sym) : "";
-		    if ($tmp == 0) {		# 0 instead of JMP ACC or HLT
-			printf "%05o	%s	0\n", $mem[$l], $label;
-		    } else {
-			$opc   = $opNames[($tmp & 076000) >> 10];
-			$ind   = $tmp & 01000 ? "@" : "";
-			$m  = $tmp & 0777;
-			unless (defined($mref = $symbols{$m})) {
-			    $mref = sprintf "%o", $m;
-			}
-			printf "%05o	%s	%s %s%s\n", $mem[$l], $label, $opc, $ind, $mref;
-		    }
-		} elsif ($listMode eq 'd') {
-		    $tmp |= -040000 if $tmp & -040000;	# extend sign
-		    printf "%6d\n", $tmp;	# list as short signed decimal
-		} elsif ($listMode eq 'u') {
-		    printf "%6u\n", $tmp;	# list as short unsigned decimal
-		} elsif ($listMode eq 'o') {
-		    printf "%#6o\n", $tmp;	# list as short unsigned octal
-		} elsif ($listMode eq 'x') {
-		    printf "%#06x\n", $tmp;	# list as short unsigned hexadecimal
-		} elsif ($listMode eq 'b') {
-		    printf "%015b\n", $tmp;	# list as short unsigned binary
-		} elsif ($listMode eq 'D') {
-		    $tmp |= -04000000000 if $tmp & -04000000000;	# extend sign
-		    printf "%10ld\n", $tmp;	# list as long signed decimal
-		} elsif ($listMode eq 'U') {
-		    printf "%9lu\n", $tmp;	# list as long unsigned decimal
-		} elsif ($listMode eq 'O') {
-		    printf "%#11lo\n", $tmp;	# list as long unsigned octal
-		} elsif ($listMode eq 'X') {
-		    printf "%#010lx\n", $tmp;	# list as long unsigned hexadecimal
-		} elsif ($listMode eq 'B') {
-		    printf "%030lb\n", $tmp;	# list as long unsigned binary
-		}
-	    }
-	    $loc = $l;
-	} elsif (m/^\s*q$/) {
-	    exit;				# quit BALAD
-	} else {
-	    print "???\n";
-	}
+sub interrupt {
+    my $signame = shift;
+    if ($signame =~ /^QUIT/) {
+	$break = 1 if $running == 1;
+    } else {
+	die "$named: Caught SIG$signame: $!";
     }
-  exitDebug:
-    print("\n") if not defined $_;
-} # debug
+} # catch_zap
+
+########################################################################
+#
+#  Convert a BALAD string to a PERL string
+#	$string = convString($memr, $vis)
+#	parameter1	memref of BALAD string
+#	parameter2	0 raw; 1 vis \t \n etc (default raw)
+#	return		perl string
+#	$cmr - global	memref of BALAD word after string
+#
+########################################################################
+
+sub convString {
+    my ($memr, $vis) = @_;
+    my ($mval, $byte, $ch, $st);
+    my @nums = ();
+    for ($cmr = $memr; ; $cmr++) {
+	$mval = $mem[$cmr];
+	last if ($byte = $mval & 0177) == 0;
+	$ch = chr $byte;
+	push @nums, $vis && defined($st = $cntrl_slash{$ch}) ? $st : $ch;
+	last if ($byte = ($mval & 077400) >> 8) == 0;
+	$ch = chr $byte;
+	push @nums, $vis && defined($st = $cntrl_slash{$ch}) ? $st : $ch;
+    }
+    $st = join "", @nums;	# build string
+    return $st;			# global $cmr returns memory ref of word after string
+} # convString
 
 ########################################################################
 #
@@ -523,10 +530,10 @@ sub debug {
 #
 #	In interactive mode the first column of octal numbers are output
 #	by the assembler (input from stdin, not from a file).
-#	Lables are followed by a colon (:) and are optional.
+#	Labels are followed by a colon (:) and are optional.
 #	White space can be 1 or more spaces or tabs.
-#	When a program is run with the R command (no address), it starts
-#	at 'main'. Alternatively use 100R to start this program.
+#	When a program is run with the r command (no address), it starts
+#	at 'main'. Alternatively use 100r to start this program.
 #	Either way the Acummulator (LOC 0) and Carry (LOC 777) are cleared.
 #
 #		;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -551,309 +558,875 @@ sub debug {
 ########################################################################
 
 sub assembleFile {
+    my ($pass) = @_;		# pass 0 interactive, pass 1 defined labels, pass 2 finish file assembly
+    my $eFlg = 0;
+    print "Enter LOC and code or data interactively (q to return to debugger)\n\n	" if $pass == 0;
+    $state = 0;			# 0 none  1 data  2 code
+    while (<IN>) {
+	chomp;							# remove new line
+	last if m/^\s*q$/;					# quit assembly
+	$eFlg += assembleLine($pass, $_);			# assemble a line
+    }
+    return $eFlg;
+} # assembleFile
+
+########################################################################
+#  Allow assembly of single lines called from debug() in pass 0
+########################################################################
+
+sub assembleLine {
     no warnings;
     no warnings 'deprecated';
-    my $comment	= '';
-    my ($pass) = @_;
-    my ($op, $num, $dval, $val, $locn, $blk, $str, $i, $char, $byte, $bs, $char0, $byte0, $bs0);
-    print "Pass = $pass on $argv\n" if $opt_l;
-    print "	" if $pass == 0;
+    my ($pass, $newLoc);
+    ($pass, $_, $newLoc) = @_;
+    my ($label, $op, $num, $dval, $val, $locn, $blk, $str);
+    my ($comment, $i, $bs, $char, $byte, $char0, $byte0);
+    my $errFlag = 0;
     $locn = $blk = $str = $dval = $val = undef;
-    $state = $byte0 = 0;
-    while (<IN>) {
-	s/[ \t]+$//;						# remove trailing spaces and tabs
-	if (m/^\s*([A-Za-z]\w*)\s*:/g) {
-	    if (not defined ($num = $symTable{$1})) {
-		$symTable{$1} = $loc;				# define symbolic reference
-		$symbols{$loc} = $1;				# inverse symbols for disassembly listing
-	    } elsif ($pass != 1 and $num != $loc) {
-		$tmp = sprintf "trying to redefine symbolic reference '%s' to %o from %o", $1, $loc, $num;
-		print "			$_";
-		warn "*** ERROR: $tmp\n";
-		$errFlag++ if $pass;
-	    }
+    s/[ \t]+$//;						# remove trailing spaces and tabs
+    $label = $comment = '';
+    if (defined $newLoc and $loc != $newLoc) {
+	$loc = $newLoc;						# one line assembly from debug
+	$state = 1;						# allow data or code line
+    }
+    ## label common to all types of statements #############################
+    if (m/^\s*([A-Za-z]\w*)\s*:/g) {
+	if (not defined ($num = $symTable{$1})) {
+	    $symTable{$1} = $num = $loc;			# define symbolic reference
+	    $symbols{$loc} = $1;				# inverse symbols for disassembly listing
+	} elsif ($pass != 1 and $num != $loc) {
+	    $tmp = sprintf "trying to redefine symbolic reference '%s' to %o from %o", $1, $loc, $num;
+	    warn "			$_\n*** ERROR: $tmp\n";
+	    $errFlag++;
 	}
-	if (m/\G\s*([A-Z]+)\s*(((@?)\s*)(([0-7]+)|((([A-Za-z]\w*)|(\.))(\s*([+-])?\s*(\d+))?)))?(\s*;.*)?$/ and
-	    defined($op = $opCodes{$1}[0]) ) {
-	    $num = 0;
-	    if ($2) {
-		if (defined $6) {
-		    $num = oct($6);				# octal memory reference
-		} else {
-		    if (defined $9) {
-			if (defined($tmp = $symTable{$9})) {	# symbolic memory reference
-			    $num = $tmp;
-			} elsif ($pass != 1) {
-			    $tmp = sprintf "%o", $loc;
-			    print "			$_";
-			    warn "*** ERROR: symbolic reference '$9' at loc $tmp has not been defined\n";
-			    $errFlag++ if $pass;
-			}
-		    } elsif (defined $10) {
-			$num = $loc;				# "." relative memory reference
+	$label = "$1:" if $num == $loc;				# for listing of "string"
+    }
+    ## code statement starting with an OP code followed by a MR ############
+    if (m/\G \s*
+	    ( [A-Z]+ ) \s*			# $1	op code
+	    (					# $2	optional memory reference - default 0 ACC
+		(				# $3
+		    (@?) \s*			# $4	optional @ for indirect MR
+		)
+		(				# $5
+		    ( [0-7]+ )			# $6	octal MR
+		    |				#	or
+		    (				# $7
+			(			# $8
+			    ( [A-Za-z]\w* )	# $9	symbolic MR label
+			    |			#	or
+			    ( \. )		# $10	current location for relative MR
+			)
+			( \s*			# $11	optional
+			    ( [+-] )? \s*	# $12	sign - missing is error
+			    ( \d+  )		# $13	decimal offset
+			)?
+		    )
+		)
+	    )?
+	    ( \s* [;#].* )?			# $14	optional comment
+	$/x and
+	defined($op = $opCodes{$1}[0]) ) {
+	$num = 0;
+	if ($2) {
+	    if (defined $6) {
+		$num = oct($6);					# octal memory reference
+	    } else {
+		if (defined $9) {
+		    if (defined($tmp = $symTable{$9})) {	# symbolic memory reference
+			$num = $tmp;
+		    } elsif ($pass != 1) {
+			$tmp = sprintf "%o", $loc;
+			warn "			$_\n*** ERROR: symbolic reference '$9' at loc $tmp has not been defined\n";
+			$errFlag++;
 		    }
-		    if (defined $11) {
-			goto SynErr0 unless $12;
-			if ($12 eq "-") {
-			    $num -= $13;			# negative offset
-			} else {
-			    $num += $13;			# positive offset
-			}
-		    }
+		} elsif (defined $10) {
+		    $num = $loc;				# "." relative memory reference
 		}
-		if ($pass != 1 and (($num &= 077777) > (($opCodes{$1}[1] || $4) ? 0776 : 0777))) {
-		    $tmp = sprintf "mr %o is illegal %s at loc %o", $num, $num eq 0777 ? "carry" : "memory reference", $loc;
-		    print "			$_";
-		    warn "*** ERROR: $tmp\n";
-		    $errFlag++ if $pass;
-		    goto Retry;
+		if (defined $11) {
+		    goto SynErr0 unless $12;
+		    if ($12 eq "-") {
+			$num -= $13;				# negative offset
+		    } else {
+			$num += $13;				# positive offset
+		    }
 		}
 	    }
-	    $val = $op | ($4 ? 01000 : 0) | $num;		# BALAD code statement
-	    $comment = $14;
-	    $state = $op ? 2 : 1;				# follow with code or data if JMP
-	} elsif (m/\G(\s*HLT)(\s*;.*)?$/) {
-	    $val = 0;						# code HLT (JMP 0)
-	    $comment = $2;
-	    $state = 1;						# end of code block
-	} elsif ($state == 2 and m/\G(\s*;.*)?$/) {
-	    $comment = $1;					# blank line or comment in code (no state change)
-	} elsif ($state <= 1) {
-	    if (m/\G\s*LOC\s*([0-7]+)(\s*;.*)?$/) {
-		$num = oct $1;					# LOC statement	(octal argument)
-		goto TestLOC;
-	    } elsif (m/\G\s*BLK\s*([1-9][0-9]*)(\s*;.*)?$/) {
-		$blk = $num = $loc + $1;			# BLK statement (decimal argument)
-	      TestLOC:
-		$comment = $2;
-		if ($pass != 1 and ($num <= 01 or $num >= 0776)) {
-		    $num = sprintf "%o", $num;
-		    print "			$_";
-		    warn "*** ERROR: LOC $num; 0, 1, 776 and 777 are reserved, > 777 are illegal\n";
-		    $errFlag++ if $pass;
-		    goto Retry;
-		} elsif ($mem[$num]) {
-		    $num = sprintf "%o", $num;
-		    goto MemERR2;		# LOC already initialised
-		} else {
-		    $locn = $num;		# LOC 02 to 0775
-		    $state = 1;
-		}
-	    } elsif (m/\G\s*([1-9][0-9]*)([lL]?)(\s*;.*)?$/) {
-		$num = $1;					# unsigned decimal number				
-		goto TestNUM;
-	    } elsif (m/\G\s*(0[0-7]*)([lL]?)(\s*;.*)?$/ or	     # octal number
-		     m/\G\s*(0[xX][0-9a-fA-F]+)([lL]?)(\s*;.*)?$/ or # hexadecimal number
-		     m/\G\s*(0[bB][01]+)([lL]?)(\s*;.*)?$/) {	     # binary number
-		$num = oct $1;
-	      TestNUM:
-		$comment = $3;
-		if ($2) {
-		    if ($num <= 07777777777) {
-			$val  = $num & 077777;			# long number
-			$dval = ($num >> 15) & 077777;
-		    } elsif ($pass != 1) {
-			print "			$_";
-			warn "*** ERROR: unsigned long number must be less than 1,073,741,824 (10000000000 octal)\n";
-			$errFlag++ if $pass;
-			goto Retry;
-		    }
-		} else {
-		    if ($num <= 077777) {
-			$val  = $num;				# short number
-		    } elsif ($pass != 1) {
-			print "			$_";
-			warn "*** ERROR: unsigned short number must be less than 32,768 (100000 octal)\n";
-			$errFlag++ if $pass;
-			goto Retry;
-		    }
-		}
-	    } elsif (m/\G\s*([-+])([1-9][0-9]*)([lL]?)(\s*;.*)?$/) {
-		$num = $2;					# signed decimal number
-		$comment = $4;
-		if ($3) {
-		    if ($num <= 03777777777) {			# long number
-			$num  =  -$num & 07777777777 if $1 eq '-';
-			$val  = $num & 077777;
-			$dval = ($num >> 15) & 077777;
-		    } elsif ($pass != 1) {
-			print "			$_";
-			warn "*** ERROR: absolute value of long signed number must be less than 536,870,912 (4000000000 octal)\n";
-			$errFlag++ if $pass;
-			goto Retry;
-		    }
-		} else {
-		    if ($num <= 037777) {			# short number
-			$val  = $1 eq '-' ? -$num & 077777 : $num;
-		    } elsif ($pass != 1) {
-			print "			$_";
-			warn "*** ERROR: absolute value of short signed number must be less than 16,384 (40000 octal)\n";
-			$errFlag++ if $pass;
-			goto Retry;
-		    }
-		}
-	    } elsif (m/\G\s*"(.*)"(\s*;.*)?$/) {
-		$str  = $1;					# character string
-		$comment = $2;
-	    } elsif (m/\G(\s*(;.*)?)?$/) {
-		$comment = $1;					# blank line or comment only
-		$state   = 0;
-	    } elsif ($state == 0) {
-		########################################################################
-		#   run and debugging commands
-		########################################################################
-		if (m/^\s*([0-7]{0,3})\s*r$/) {
-		    $pc = $1 ? oct $1 : 0100;			# <pc> run (default 0100 main)
-		    print "\n";
-		    run();
-		    goto Retry;
-		} elsif (m/^\s*q$/) {
-		    exit;					# quit BALAD
-		} elsif ($pass != 1) {
-		    goto SynErr0;
-		}
-	    } elsif ($pass != 1) {
-	      SynErr0:
-		print "			$_";
-		warn "*** ERROR: syntax error - code or data not recognised\n";
-		$errFlag++ if $pass;
+	    if ($pass != 1 and (($num &= 077777) >= (($opCodes{$1}[1] || $4) ? 0777 : 01000))) {
+		$tmp = sprintf "mr %o is illegal %s at loc %o", $num, $num eq 0777 ? "carry" : "memory reference", $loc;
+		warn "			$_\n*** ERROR: $tmp\n";
+		$errFlag++;
 		goto Retry;
 	    }
+	}
+	$val = $op | ($4 ? 01000 : 0) | $num;			# BALAD code statement
+	$comment = $14;
+	$state = $op ? 2 : 1;					# follow with code or data if JMP
+    ## HLT statement #######################################################
+    } elsif (m/\G(\s*HLT)(\s*[;#].*)?$/) {
+	$val = 0;						# code HLT (JMP 0)
+	$comment = $2;
+	$state = 1;						# end of code block
+    ## blank line or comment in a code block ###############################
+    } elsif ($state == 2 and m/\G(\s*[;#].*)?$/) {
+	$comment = $1;						# blank line or comment in code (no state change)
+    } elsif ($state <= 1) {
+	## LOC statement #######################################################
+	if (m/\G\s*LOC\s*([0-7]+)(\s*[;#].*)?$/) {
+	    $num = oct $1;					# LOC statement	(octal argument)
+	    goto TestLOC;
+	## BLK statement #######################################################
+	} elsif (m/\G\s*BLK\s*([1-9][0-9]*)(\s*[;#].*)?$/) {
+	    $blk = $num = $loc + $1;				# BLK statement (decimal argument)
+	  TestLOC:
+	    $comment = $2;
+	    if ($pass != 1 and ($num <= 0 or $num >= 0777)) {
+		$num = sprintf "%o", $num;
+		warn "			$_\n*** ERROR: LOC $num; 0 and 777 are reserved, > 777 is illegal\n";
+		$errFlag++;
+		goto Retry;
+	    } elsif ($pass >= 1 and $mem[$num]) {
+		$num = sprintf "%o", $num;
+		goto MemERR2;		# LOC already initialised
+	    } else {
+		$locn = $num;		# LOC 02 to 0776
+		$state = 1;
+	    }
+	## unsigned decimal number #############################################
+	} elsif (m/\G\s*([1-9][0-9]*)([lL]?)(\s*[;#].*)?$/) {
+	    $num = $1;						# unsigned decimal number
+	    goto TestNUM;
+	## octal, hexadecimal or binary number #################################
+	} elsif (m/\G\s*(0[0-7]*)([lL]?)(\s*[;#].*)?$/ or	# octal number
+		 m/\G\s*(0[xX][0-9a-fA-F]+)([lL]?)(\s*[;#].*)?$/ or # hexadecimal number
+		 m/\G\s*(0[bB][01]+)([lL]?)(\s*[;#].*)?$/) {	# binary number
+	    $num = oct $1;
+	  TestNUM:
+	    $comment = $3;
+	    if ($2) {
+		if ($num <= 07777777777) {
+		    $val  = $num & 077777;			# long number
+		    $dval = ($num >> 15) & 077777;
+		} elsif ($pass != 1) {
+		    warn "			$_\n*** ERROR: unsigned long number must be less than 1,073,741,824 (10000000000 octal)\n";
+		    $errFlag++;
+		    goto Retry;
+		}
+	    } else {
+		if ($num <= 077777) {
+		    $val  = $num;				# short number
+		} elsif ($pass != 1) {
+		    warn "			$_\n*** ERROR: unsigned short number must be less than 32,768 (100000 octal)\n";
+		    $errFlag++;
+		    goto Retry;
+		}
+	    }
+	## signed decimal number ###############################################
+	} elsif (m/\G\s*([-+])([1-9][0-9]*)([lL]?)(\s*[;#].*)?$/) {
+	    $num = $2;						# signed decimal number
+	    $comment = $4;
+	    if ($3) {
+		if ($num <= 03777777777) {			# long number
+		    $num  =  -$num & 07777777777 if $1 eq '-';
+		    $val  = $num & 077777;
+		    $dval = ($num >> 15) & 077777;
+		} elsif ($pass != 1) {
+		    warn "			$_\n*** ERROR: absolute value of long signed number must be less than 536,870,912 (4000000000 octal)\n";
+		    $errFlag++;
+		    goto Retry;
+		}
+	    } else {
+		if ($num <= 037777) {				# short number
+		    $val  = $1 eq '-' ? -$num & 077777 : $num;
+		} elsif ($pass != 1) {
+		    warn "			$_\n*** ERROR: absolute value of short signed number must be less than 16,384 (40000 octal)\n";
+		    $errFlag++;
+		    goto Retry;
+		}
+	    }
+	## character "string" ##################################################
+	} elsif (m/\G\s*"(.*)"(\s*[;#].*)?$/) {
+	    $str  = $1;						# character string
+	    $comment = $2;
+	## blank line or comment in a data block ###############################
+	} elsif (m/\G(\s*([;#].*)?)?$/) {
+	    $comment = $1;					# blank line or comment only
+	    $state   = 0;
+	## data not recognised #################################################
 	} elsif ($pass != 1) {
-	    $num = sprintf "%o", $loc;
-	    print "			$_";
-	    warn "*** ERROR: syntax error or code block not terminated by a JMP or HLT instruction at loc $num\n";
-	    $errFlag++ if $pass;
+	  SynErr0:
+	    warn "			$_\n*** ERROR: syntax error - code or data not recognised\n";
+	    $errFlag++;
 	    goto Retry;
 	}
+    ## code not recognised or improper code block termination ##############
+    } elsif ($pass != 1) {
+	$num = sprintf "%o", $loc;
+	warn "			$_\n*** ERROR: syntax error or code block not terminated by a JMP or HLT instruction at loc $num\n";
+	$errFlag++;
+	goto Retry;
+    }
+    ########################################################################
+    #   End of one input line
+    ########################################################################
+    if (($opt_l and $pass != 1) or defined $newLoc) {
 	########################################################################
-	#   End of one input line
+	#   Optionally list code or data produced - check for address error
 	########################################################################
-	if ($opt_l and $pass != 1) {
-	    ########################################################################
-	    #   Optionally list code or data produced - check for address error
-	    ########################################################################
-	    if (defined $dval) {
-		if ($loc >= 0776 or $mem[$loc]) { goto MemERR0; }
-		printf "	%03o	%05o	%s", $loc, $val, $_;
-		if ($loc + 1 >= 0776 or $mem[$loc + 1]) { $loc++; goto MemERR0; }
+	print "==>" if defined $newLoc;				# for call from debug()
+	if (defined $val) {					# code or short number
+	    if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR0; }
+	    printf "	%03o	%05o	%s\n", $loc, $val, $_;
+	    if (defined $dval) {				# long double precision number
+		if ($loc + 1 > 0777 or ($pass >= 1 and $mem[$loc + 1])) { $loc++; goto MemERR0; }
 		printf "	%03o	%05o	(%#o)\n", $loc + 1, $dval, ($dval << 15) + $val;
-	    } elsif (defined $val) {
-		if ($loc >= 0776 or $mem[$loc]) { goto MemERR0; }
-		printf "	%03o	%05o	%s", $loc, $val, $_;
-	    } elsif (defined $str) {
-		$byte0 = $char0 = $bs0 = $bs = $i = 0;
-		foreach $char (split //, $str) {
-		    $byte = ord($char);
-		    if ($bs) {
-			if ($byte == 0156) {
-			    $byte = 012;	# "\n"  LINE FEED
-			} elsif ($byte == 0164) {
-			    $byte = 011;	# "\t"  TAB
-			}
-		    } elsif ($byte == 0134) {
-			$bs = 0134;	# '\'
-			next;
-		    }
-		    if ($byte0) {
-			if ($loc + $i >= 0776 or $mem[$loc + $i]) { $loc += $i; goto MemERR0; }
-			if ($i == 0) {
-			    printf "	%03o	%05o	%c%s %c%s	%s", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $bs0, $char0, $bs, $char, $_;
-			} else {
-			    printf "	%03o	%05o	%c%s %c%s\n", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $bs0, $char0, $bs, $char;
-			}
-			$byte0 = 0;
-			$char0 = '';
-		    } else {
-			$byte0 = $byte;
-			$char0 = $char;
-			$bs0   = $bs;
-		    }
-		    $bs = 0;		# all other chars following '\' unchanged
-		}
-		if ($loc + $i >= 0776 or $mem[$loc + $i]) { $loc += $i; goto MemERR0; }
-		printf "	%03o	%05o	%c%s", $loc + $i, ($byte0 & 0177), $bs0, $char0;
-		if ($i == 0) {
-		    printf "	%s", $_;
-		} else {
-		    print "\n";
-		}
-	    } elsif (defined $blk) {
-		printf "	%03o		%s", $loc, $_;
-	    } else {
-		printf "			%s", $_;	# all other lines
 	    }
-	    if ($comment) {
-		$comments{$loc} .= "$comment\n";
-		$comment = '';
-	    }
-	}
-	########################################################################
-	#   Store code or data in memory - check for address error
-	#   This section is missed if optional listing found an error
-	########################################################################
-	if (defined $val) {			# single word of code or numeric data
-	    if ($loc >= 0776 or $mem[$loc]) { goto MemERR1; }
-	    $mem[$loc] = $val if $pass != 1;
-	    $loc++;
-	    if (defined $dval) {		# high order word of numeric data
-		if ($loc >= 0776 or $mem[$loc]) { goto MemERR1; }
-		$mem[$loc] = $dval if $pass != 1;
-		$loc++;
-	    }
-	} elsif (defined $str) {		# "character string" (may be more than 1 word)
+	} elsif (defined $str) {				# string
+	    $char0 = '';
 	    $byte0 = $bs = $i = 0;
-	    foreach $byte (split //, $str) {
-		$byte = ord($byte);
+	    foreach $char (split //, $str) {
+		$byte = ord $char;
 		if ($bs) {
-		    if ($byte == 0156) {
-			$byte = 012;		# "\n"  LINE FEED
-		    } elsif ($byte == 0164) {
-			$byte = 011;		# "\t"  TAB
+		    if (defined($tmp = $ascii_cntrl{$char})) {
+			$char = $cntrl_slash{$tmp};		# "\n" => "\\n" should be defined
+			die "*** internal error - cntrl_slash hashes not correct ???" unless defined $char;
+			$byte = ord $tmp;			# \ n  => "\n"  etc
 		    }
-		} elsif ($byte == 0134) {
-		    $bs = 1;		# '\'
+		} elsif ($char eq "\\") {
+		    $bs = 1;
 		    next;
 		}
-		$bs = 0;			# all other chars following '\' unchanged
+		$bs = 0;					# all other chars following '\' unchanged
+		$char = $tmp if defined ($tmp = $cntrl_slash{$char});	# "\n" => "\\n"
 		if ($byte0) {
-		    if ($loc >= 0776 or $mem[$loc]) { goto MemERR1; }
-		    $mem[$loc] = (($byte & 0177) << 8) + ($byte0 & 0177) if $pass != 1;
-		    $loc++;
+		    if ($loc + $i > 0777 or ($pass >= 1 and $mem[$loc + $i])) { $loc += $i; goto MemERR0; }
+		    if ($i == 0) {
+			printf "\t%03o\t%05o\t%s\t%s %s\t\"%s\"\n", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $label, $char0, $char, $str;
+		    } else {
+			printf "\t%03o\t%05o\t\t%s %s\n", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $char0, $char;
+		    }
 		    $byte0 = 0;
+		    $char0 = '';
 		} else {
 		    $byte0 = $byte;
+		    $char0 = $char;
 		}
 	    }
-	    if ($loc >= 0776 or $mem[$loc]) { goto MemERR1; }
-	    $mem[$loc] = ($byte0 & 0177) if $pass != 1;
-	    $loc++;
-	} elsif (defined $locn) {
-	    $loc = $locn;
-	}
-	goto Retry;
-      MemERR0:
-	print "\n";
-      MemERR1:
-	$byte0 = 0;
-	$num = sprintf "%o", $loc;
-      MemERR2:
-	print "			$_";
-	warn "*** ERROR: LOC $num has already been initialised with code or data\n";
-	$errFlag++ if $pass;
-      Retry:
-	$locn = $blk = $str = $dval = $val = undef;
-	if ($pass == 0) {
-	    if ($state == 0) {
-		printf "	";
+	    if ($loc + $i > 0777 or ($pass >= 1 and $mem[$loc + $i])) { $loc += $i; goto MemERR0; }
+	    if ($i == 0) {
+		printf "\t%03o\t%05o\t%s\t%s\t\"%s\"\n", $loc + $i, ($byte0 & 0177), $label, $char0, $str;
 	    } else {
-		printf "%03o	", $loc;
+		printf "\t%03o\t%05o\t\t%s\n", $loc + $i, ($byte0 & 0177), $char0;
 	    }
+	} elsif (defined $blk) {
+	    printf "	%03o		%s\n", $loc, $_;
+	} else {
+	    printf "			%s\n", $_;		# all other lines
+	}
+	if ($comment) {
+	    $comments{$loc} .= "$comment\n";
+	    $comment = '';
+	}
+    }
+    ########################################################################
+    #   Store code or data in memory - check for address error
+    #   This section is missed if optional listing found an error
+    ########################################################################
+    if (defined $val) {						# single word of code or numeric data
+	if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	$mem[$loc] = $val if $pass != 1;
+	$loc++;
+	if (defined $dval) {					# high order word of numeric data
+	    if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	    $mem[$loc] = $dval if $pass != 1;
+	    $loc++;
+	}
+    } elsif (defined $str) {					# "character string" (may be more than 1 word)
+	$byte0 = $bs = $i = 0;
+	foreach $char (split //, $str) {
+	    $byte = ord $char;
+	    if ($bs) {
+		if (defined($tmp = $ascii_cntrl{$char})) {
+		    $byte = ord $tmp;				# \ n  => "\n"  etc
+		}
+	    } elsif ($char eq "\\") {
+		$bs = 1;
+		next;
+	    }
+	    $bs = 0;						# all other chars following '\' unchanged
+	    if ($byte0) {
+		if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+		$mem[$loc] = (($byte & 0177) << 8) + ($byte0 & 0177) if $pass != 1;
+		$loc++;
+		$byte0 = 0;
+	    } else {
+		$byte0 = $byte;
+	    }
+	}
+	if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	$mem[$loc] = ($byte0 & 0177) if $pass != 1;
+	$loc++;
+    } elsif (defined $locn) {
+	$loc = $locn;						# no data stored
+    }
+    goto Retry;
+  MemERR0:
+    print "\n";
+  MemERR1:
+    $byte0 = 0;
+    $num = sprintf "%o", $loc;
+  MemERR2:
+    warn "			$_\n*** ERROR: LOC $num illegal or already initialised with code or data\n";
+    $errFlag++;
+  Retry:
+    $locn = $blk = $str = $dval = $val = undef;
+    if ($pass == 0 and not defined $newLoc) {
+	if ($state == 0) {
+	    printf "	";
+	} else {
+	    printf "%03o	", $loc;
 	}
     }
     use warnings 'deprecated';
     use warnings;
-} # assembleFile
+    return $errFlag;
+} # assembleLine
+
+########################################################################
+#
+#  Debugger
+#    arg1: 0 called before running a program
+#	   1 called from a break
+#	   2 called from a watch point
+#
+#    Locations <n> or <m> may be an octal number or
+#	a defined address label [+/- a decimal offset] or
+#	. [+ or/ decimal offset], where . is the current location
+#
+#    >> enter a debug command when program is not running
+#		The run or enter command can only be called at >>
+#		when arg1 == 0.
+#	r	   run code from address 'main' if defined - else 0100
+#	<n>r	   run code from address <n>
+#	e	   enter new or revised code or data interactively
+#		   terminate entry with key q or ctrl-D (EOF)
+#
+#    B> enter a debug command at a break point
+#    W> enter a debug command at a watch point
+#		The following commands can only be called at a break
+#		or watch point of an interrupted running program
+#		when arg1 >= 1
+#	s	   STEP to next instruction, entering into JMS subroutines
+#	n	   execute NEXT instruction skipping over JMS subroutines
+#	u	   continue execution UNTIL leaving current subroutine
+#	c	   CONTINUE execution until next break or watch point
+#	a	   abort the current program - allow new run or enter
+#
+#		All other commands can be called in either mode.
+#	q	   QUIT balad
+#	h	   output this HELP text
+#	*	   set a BREAK or watch point at current location
+#	<n>*	   set a BREAK or watch point at location <n>
+#	<n>,<m>*   set BREAK or watch points at locations <n> to <m>
+#	#	   CLEAR all break or watch points
+#	.#	   CLEAR a break or watch point at current location
+#	<n>#	   CLEAR a break or watch point at location <n>
+#	<n>,<m>#   CLEAR break or watch points at locations <n> to <m>
+#	=	   list all break or watch points in current list mode
+#	<n>,<m>=   list break or watch points in range <n> to <m>
+#	< <code>   assemble <code> or <data> at current location
+#	<n>< <code>  assemble <code> or <data> at location <n>
+#
+#		List commands show an octal memory address and the contents
+#	/c	   list code at current location
+#	<n>/c	   list code at location <n>
+#	<n>,<m>/c  list code at locations <n> to <m>
+#
+#		Similarly for different list modes
+#	/d	   list short signed decimal
+#	/u	   list short unsigned decimal
+#	/o	   list short unsigned octal
+#	/x	   list short unsigned hexadecimal
+#	/b	   list short unsigned binary
+#	/D	   list long signed decimal
+#	/U	   list long unsigned decimal
+#	/O	   list long unsigned octal
+#	/X	   list long unsigned hexadecimal
+#	/B	   list long unsigned binary
+#	/s	   list text string up to next NULL
+#		these apply to all other commands starting at * (set a BREAK)
+#	/  or enter    list location(s) in current list mode
+#
+#	-	stop listing code output during execution
+#	-l	list code output during execution
+#	  -d	additionally  trace C, ACC and MR in decimal
+#	  -o	alternatively trace C, ACC and MR in octal
+#	  -x	alternatively trace C, ACC and MR in hexadecimal
+#	  -b	alternatively trace C, ACC and MR in binary
+#		In each case trace values before and after execution.
+#		Without -l trace only at break or watch points.
+#
+########################################################################
+
+sub debug {
+    my ($mode, $op, $mr) = @_;
+    my ($listCmd, $lstart, $lfin, $l, $brkStar, $label, $sym, $stFlag, $num, $assIn);
+    $running = 2 if $running;			# stop interrupt with ctrl-\ key in debug
+    if ($mode == 0) {
+	if ($filesAssd != 0) {
+	    if (defined($tmp = $symTable{'main'}) and not $opt_l) {
+		########################################################################
+		#  No essmbly errors in file(s) - run if main: defined and not -l
+		########################################################################
+		$pc = $loc = $tmp;		# start location defined in the assembled program
+		run();				# run the code immediately
+		exit() unless $abort;
+	    } else {
+		########################################################################
+		#  else enter debugger
+		########################################################################
+		$loc = $tmp if defined $tmp;
+		print "BALAD debugger - enter r to run code at 0100, e to enter more code interactively\n";
+	    }
+	} else {
+	    ########################################################################
+	    #  BALAD called without file argements - enter code for interactive assembly
+	    ########################################################################
+	    unless (open (IN, "-")) {		# STDIN	- no source file arguments
+		die "can't open STDIN ???";
+	    }
+	    $argv = "-";			# enter first code or data
+	    assembleFile(0);			# interactive pass 0
+	    close(IN);
+	    print("\n");
+	}
+    }
+    ########################################################################
+    #  entered debug proper after assembly or from a break or watch point
+    ########################################################################
+  Input:
+    while (defined($tmp = sprintf "%03o %s ", $loc, $debPrompts[$mode]) and	# always true
+	defined($_ = $term->readline("$tmp"))) {
+	if ($mode == 0) {
+	    if (m/^\s*e(nter)?$/) {		# enter command (must be first - otherwise label 'e')
+		########################################################################
+		#  enter more code or data
+		########################################################################
+		unless (open (IN, "-")) {	# STDIN
+		    die "can't open STDIN ???";
+		}
+		$argv = "-";
+		assembleFile(0);		# interactive pass 0
+		close(IN);
+		print("\n");
+		next;
+	    }
+	    if (m/^ \s*
+		(					# $1	optional
+		    (					# $2	address
+			( [0-7]+ )			# $3	octal MR
+			|				#	or
+			(				# $4
+			    (				# $5
+				( [A-Za-z]\w* )		# $6	symbolic MR label
+				|			#	or
+				( \. )			# $7	current location for relative MR
+			    )
+			    ( \s*			# $8	optional
+				( [+-] ) \s*		# $9	sign - missing is error
+				( \d+  )		# $10	decimal offset
+			    )?
+			)
+		    ) \s*
+		)?  r(un)?				# $11	 run command
+	    $/x) {
+		########################################################################
+		#  r         run BALAD code from default start address is main: or 0100
+		#  <octal>r  run BALAD code from octal address
+		#  <label>r  run BALAD code from a symbolic address
+		#  .+/-<n>r  run BALAD code from a relative address
+		########################################################################
+		if (not $1) {
+		    $num = defined($tmp = $symTable{'main'}) ? $tmp : 0100;	# default start address
+		} elsif (defined $3) {
+		    $num = oct($3);			# octal memory reference
+		} else {
+		    if (defined $6) {
+			if (defined($tmp = $symTable{$6})) {# symbolic memory reference
+			    $num = $tmp;
+			} else {
+			    warn "??? symbolic reference '$6' has not been defined\n";
+			    next;
+			}
+		    } elsif (defined $7) {
+			$num = $loc;			# "." relative memory reference
+		    }
+		    if (defined $8) {
+			if ($9 eq "-") {
+			    $num -= $10;		# negative offset
+			} elsif ($9 eq "+") {
+			    $num += $10;		# positive offset
+			}
+		    }
+		}
+		$pc = $num;
+		run();
+		next;
+	    }
+	} else {
+	    ########################################################################
+	    #  entered from break in executing code (mode >= 1)
+	    #	s	step one instruction	- into JMS subroutine
+	    #	n	next instruction	- skip over JMS subroutine
+	    #	u	until return out of current JMS subroutine
+	    #	c	continue until next break or watch point
+	    #	a	abort execution		- stop program running
+	    ########################################################################
+	    $break = 0;
+	    if (m/^\s*([snuca])$/) {
+		if ($1 eq 's') {		# single step
+		    $break = 1;
+		} elsif ($1 eq 'n') {		# next unless JMS at a break point
+		    if ($op != 01 or $mode != 1) {
+			$break = 1;
+		    } else {
+			$jmsCall = $mr;		# defer breaks until return from this JMS
+		    }
+		} elsif ($1 eq 'u') {		# run until return from current JMS
+		    $jmsCall = $jmsStack[$#jmsStack] if scalar @jmsStack;
+		} elsif ($1 eq 'a') {		# abort execution
+		    $abort = 1;
+		}
+		goto stopDebug;			# continue ('c' is none of the above)
+	    } elsif (m/((r(un)?)|(e(nter)?))$/) {
+		$tmp = $2 ? "run" : "enter";
+		$sym = $mode == 1 ? "break" : "watch";
+		warn "??? cannot $tmp a program from a $sym point - exit first with 'a'\n";
+		next;
+	    }
+	}
+	########################################################################
+	#  rest can be called in all modes
+	#  optional address or address range for all following debug commands
+	########################################################################
+	if (m/^\s*q(uit)?$/) {
+	    exit;				# quit BALAD (must be first - otherwise label 'q')
+	}
+	if (m/^\s*h(elp)?$/) {	
+	    ########################################################################
+	    #  output help text
+	    ########################################################################
+	    write STDOUT;
+	    next;
+	}
+	if (m/^
+	    (   \s*				# $1  optional address
+		(				# $2  start of range
+		    ( [0-7]+ )			# $3	octal MR
+		    |				#	or
+		    (				# $4
+			(			# $5
+			    ( [A-Za-z]\w* )	# $6	symbolic MR label
+			    |			#	or
+			    ( \. )		# $7	current location for relative MR
+			)
+			( \s*			# $8	optional
+			    ( [+-] ) \s*	# $9	sign - missing is error
+			    ( \d+  )		# $10	decimal offset
+			)?
+		    )
+		)
+		(   \s*,\s*			# $11 optional
+		    (				# $12 end of range
+			( [0-7]+ )		# $13	octal MR
+			|			#	or
+			(			# $14
+			    (			# $15
+				( [A-Za-z]\w* )	# $16	symbolic MR label
+				|		#	or
+				( \. )		# $17	current location for relative MR
+			    )
+			    ( \s*		# $18	optional
+				( [+-] ) \s*	# $19	sign - missing is error
+				( \d+  )	# $20	decimal offset
+			    )?
+			)
+		    )
+		)?
+	    )?  \s*
+	    (				# $21 optional empty command (list)
+		( [*#=<\/] )		# $22 command selection
+		( [cduoxbDUOXBsS] )?	# $23 optional list mode selection
+		( .* )			# $24 optional assembly input
+	    )?
+	$/x) {
+	    ########################################################################
+	    #  act on or list 1 or more memory locations in selected list mode
+	    ########################################################################
+	    $lstart = $lfin = $loc;		# defaults if no address or range is specified
+	    $assIn = "";
+	    if ($21) {
+		$listCmd = $22;
+		if ($listCmd ne "<" and defined $24 and $24 ne "") {
+		    warn "??? '$listCmd' command does not accept assembly code '$24'\n";
+		    next;
+		} else {
+		    $assIn = $24;
+		}
+	    } else {
+		$listCmd = "/";
+	    }
+	    if (defined $1 and $1 ne "") {
+		if (defined $3) {				# start of range
+		    $num = oct($3);				# octal memory reference
+		} else {
+		    if (defined $6) {
+			if (defined($tmp = $symTable{$6})) {	# symbolic memory reference
+			    $num = $tmp;
+			} elsif ($6 =~ m/^([snuca])$/) {
+			    warn "??? command '$1' can only be called at a break or watch point\n";
+			    next;				# s n u c a in symbol table have precedence
+			} else {
+			    warn "??? symbolic reference '$6' has not been defined\n";
+			    next;
+			}
+		    } elsif (defined $7) {
+			$num = $loc;				# "." relative memory reference
+		    }
+		    if (defined $8) {
+			if ($9 eq "-") {
+			    $num -= $10;			# negative offset
+			} elsif ($9 eq "+") {
+			    $num += $10;			# positive offset
+			}
+		    }
+		}
+		$lstart = $lfin = $num;
+		if (defined $11) {
+		    if (defined $13) {				# optional end of range
+			$num = oct($13);			# octal memory reference
+		    } else {
+			if (defined $16) {
+			    if (defined($tmp = $symTable{$16})) {	# symbolic memory reference
+				$num = $tmp;
+			    } else {
+				warn "??? symbolic reference '$16' has not been defined\n";
+				next;
+			    }
+			} elsif (defined $17) {
+			    $num = $loc;			# "." relative memory reference
+			}
+			if (defined $18) {
+			    if ($19 eq "-") {
+				$num -= $20;			# negative offset
+			    } elsif ($19 eq "+") {
+				$num += $20;			# positive offset
+			    }
+			}
+		    }
+		    $lfin = $num;
+		}
+	    } elsif ($listCmd eq "=" or $listCmd eq "#") {
+		$lstart = 0;			# full range for listing break points
+		$lfin   = 0777;
+	    }
+	    if ($lstart > $lfin) {
+		warn"??? listing range must be rising\n";
+		next;				# $loc unchanged
+	    }
+	    if ($lfin > 0777) {
+		warn"??? memory limit is octal 777\n";
+		next;				# $loc unchanged
+	    }
+	    if ($listCmd eq "<") {
+		if ($23) {
+		    $assIn = "$23$assIn";		# no list mode after < - fixes BLK and DEC
+		}
+		if ($assIn =~ m/^\s*([A-Za-z]\w*\s*:\s*)?[A-Z][A-Z][A-Z]/) {
+		    $listMode = "c";			# code
+		    $listOfs = 1;
+		} elsif ($assIn =~ m/^\s*([A-Za-z]\w*\s*:\s*)?([+-]\s*)?\d/) {
+		    $tmp = $2;				# + or - sign
+		    if ($assIn =~ m/[lL]\s*([;#].*)?$/) {
+			$listMode = $tmp ? "D" : "U";	# long number
+			$listOfs = 2;
+		    } else {
+			$listMode = $tmp ? "d" : "u";	# short number
+			$listOfs = 1;
+		    }
+		} elsif ($assIn =~ m/^\s*([A-Za-z]\w*\s*:\s*)?".*"/) {
+		    $listMode = "s";			# string
+		    $listOfs = 1;
+		} elsif ($assIn !~ m/^\s*([;#].*)?$/) {	# ignore comment only
+		    warn "??? cannot assemble '$assIn'\n";
+		    next;			# $loc unchanged
+		}
+		if ($listMode eq "s" or $listMode eq "S") {
+		    $lfin = $lstart;		# cannot assemble more than one string
+		}
+	    } elsif ($23) {
+		    $listMode = $23;		# change list mode for all other commands
+		    $listOfs = ($listMode =~ m/[DUOXB]/) ? 2 : 1;	# and offset
+	    }
+	    $stFlag = 1;
+	    for ($l = $lstart; $l <= $lfin; $l += $listOfs) {
+		########################################################################
+		#  select command
+		########################################################################
+		if ($listCmd eq "*") {
+		    $breaks[$l] = 1;		# set a break or watch point and list
+		} elsif ($listCmd eq "#") {
+		    if ($breaks[$l] == 1) {
+			$breaks[$l] = 0;	# clear a break or watch point and list
+		    } else {
+			next;			# skip unless break or watch point was set
+		    }
+		} elsif ($listCmd eq "=") {
+		    next if $breaks[$l] != 1;	# list break or watch points
+		}
+		$brkStar = $breaks[$l] ? "  *" : "";
+		$label = defined($sym = $symbols{$l}) ? sprintf("%s:", $sym) : "";
+		$tmp = $mem[$l];
+		printf "	%03o%s	%05o	%s	", $l, $brkStar, $tmp, $label;
+		$tmp += ($mem[$l+1] << 15) if $listOfs == 2;
+		########################################################################
+		#  select list mode
+		########################################################################
+		if ($listMode eq 'c') {		# list as balad code
+		    my ($opc, $ind, $m, $mref);
+		    if ($tmp == 0) {		# 0 instead of JMP ACC or HLT
+			printf "0\n";
+		    } else {
+			$opc   = $opNames[($tmp & 076000) >> 10];
+			$ind   = $tmp & 01000 ? "@" : "";
+			$m  = $tmp & 0777;
+			unless (defined($mref = $symbols{$m})) {
+			    $mref = sprintf "%o", $m;
+			}
+			printf "%s %s%s\n", $opc, $ind, $mref;
+		    }
+		} elsif ($listMode eq 'd') {
+		    $tmp |= -040000 if $tmp & -040000;	# extend sign
+		    printf "%6d\n", $tmp;	# list as short signed decimal
+		} elsif ($listMode eq 'u') {
+		    printf "%6u\n", $tmp;	# list as short unsigned decimal
+		} elsif ($listMode eq 'o') {
+		    printf "%#6o\n", $tmp;	# list as short unsigned octal
+		} elsif ($listMode eq 'x') {
+		    printf "%#06x\n", $tmp;	# list as short unsigned hexadecimal
+		} elsif ($listMode eq 'b') {
+		    printf "%015b\n", $tmp;	# list as short unsigned binary
+		} elsif ($listMode eq 'D') {
+		    $tmp |= -04000000000 if $tmp & -04000000000;	# extend sign
+		    printf "%10ld\n", $tmp;	# list as long signed decimal
+		} elsif ($listMode eq 'U') {
+		    printf "%9lu\n", $tmp;	# list as long unsigned decimal
+		} elsif ($listMode eq 'O') {
+		    printf "%#11lo\n", $tmp;	# list as long unsigned octal
+		} elsif ($listMode eq 'X') {
+		    printf "%#010lx\n", $tmp;	# list as long unsigned hexadecimal
+		} elsif ($listMode eq 'B') {
+		    printf "%030lb\n", $tmp;	# list as long unsigned binary
+		} elsif ($listMode eq "s" or $listMode eq "S") {
+		    my ($byte0, $byte1, $ch, $st);	# list as text string
+		    $byte0 = $tmp & 0177;
+		    $byte1 = ($tmp & 077400) >> 8;
+		    if ($listMode eq "s") {
+			$ch = chr $byte0;
+			printf "%s ", defined($st = $cntrl_slash{$ch}) ? $st : $ch;
+			$ch = chr $byte1;
+			printf "%s", defined($st = $cntrl_slash{$ch}) ? $st : $ch;
+		    }
+		    if ($stFlag) {
+			my $string = convString($l, 1);	# global $cmr returns address of next word
+			if ($cmr > $lfin) {
+			    $lfin = $cmr;		# extend listing to end of current string
+			}
+			if ($listMode eq "S") {
+			    print "\"$string\"";
+			    $l = $cmr;			# skip octal listing to end of string
+			} else {
+			    print "	\"$string\"";
+			    $stFlag = 0;
+			}
+		    }
+		    print "\n";
+		    if ($byte0 == 0 or $byte1 == 0) {
+			$stFlag = 1;		# end of current string found - start another
+		    }
+		}
+		########################################################################
+		#  end of list modes - default is simple list like /
+		#  list hi order byte of a double precision number
+		########################################################################
+		printf("	%03o	%05o\n", $l+1, $mem[$l+1]) if $listOfs == 2;
+		if ($listCmd eq "<" and $stFlag) {
+		    ########################################################################
+		    #  Assemble one code statement, one single or double precision number
+		    #  which my be signed or unsigned decimal, octal, hexadcimal or binary,
+		    #  or one string, which may write a number of words. The format and
+		    #  restrictions are the same for BALAD source files, interactive
+		    #  entry or this single line debug entry. They all call the same assembler.
+		    #  The only difference is, that locations are defined by the debug address
+		    #  before the < command like all other debug commands and not by LOC
+		    #  or BLK statements.
+		    #
+		    #  This input to modify words in memory is for the purpose of debugging
+		    #  and will mainly involve changing data. If just a single instruction
+		    #  has to be changed - like changing the sense of a conditional JMP that
+		    #  should be OK. If more code is to be changed that is probably better
+		    #  done in interactive entry mode or if instructions have to be inserted,
+		    #  editing the source file and calling BALAD with the modified source.
+		    ########################################################################
+		    if ($assIn =~ m/^\s*(LOC|BLK)/) {
+			warn "??? LOC or BLK have no effect in debug single line assembly\n";
+			next Input;
+		    }
+		    ## assemble a line out of debug ########################################
+		    if (assembleLine(0, $assIn, $listMode eq "s" || $listMode eq "S" ? $lstart : $l) or
+			$assIn =~ m/^\s*([;#].*)?$/) {
+			next Input;			# $loc unchanged
+		    }
+		    $l = $loc - $listOfs;		# take $loc from assembly
+		    $lfin = $l if $listMode eq "s"	# $lfin was from old string, which may be longer
+			       or $listMode eq "S";	# which led to an infinite loop
+		}
+	    }
+	    $loc = $l;
+	} elsif (m/^\s*-(l?)([doxb]?)$/) {
+	    ########################################################################
+	    #  change trace modes
+	    #    -	no tracing
+	    #    -l	only list code
+	    #    -lo	plus trace C, ACC, MR as octal
+	    #    -o	plus trace C, ACC, MR as octal only at break points
+	    #    Similarly for -ld -d -lx -x -lb -b
+	    ########################################################################
+	    $opt_l = $1;
+	    $opt_o = $opt_d = $opt_x = $opt_b = "";
+	    if ($2 eq 'o') {
+		$opt_o = $2;
+		$traceFormat = "%sC %d ACC %05o [%03o] %05o";
+	    } elsif ($2 eq 'd') {
+		$opt_d = $2;
+		$traceFormat = "%sC %d ACC %5d [%03o] %5d";
+	    } elsif ($2 eq 'x') {
+		$opt_x = $2;
+		$traceFormat = "%sC %d ACC %04x [%03o] %04x";
+	    } elsif ($2 eq 'b') {
+		$opt_b = $2;
+		$traceFormat = "%sC %d ACC %015b [%03o] %015b";
+	    }
+	    $optlx =  $opt_l && ($opt_o || $opt_d || $opt_x || $opt_b);
+	    $optnx = !$opt_l && ($opt_o || $opt_d || $opt_x || $opt_b);
+	} else {
+	    warn "???\n";
+	}
+    }
+    if (not defined $_) { print "\n"; $abort = 1 if $mode; }	# ctrl-D
+  stopDebug:
+    $running = 1 if $running;
+} # debug
 
 ########################################################################
 #
@@ -863,82 +1436,72 @@ sub assembleFile {
 
 sub run {
     my ($t0, $t1, $sec, $usec);
-    my ($instr, $op, $num, $next, $jmsFlag);
-    if ($errFlag) {
-	warn "*** ERROR: cannot run because of previous $errFlag assembly errors\n";
+    my ($instr, $op, $num, $next, $jmsFlag, $n, $mv, $trace);
+    if ($eF) {
+	warn "*** ERROR: cannot run because of previous $eF assembly errors\n";
 	exit;
     }
     $mem[0] = $mem[0777] = $jtA = $jtC = $jmsCall = $break = $next = $abort = 0;	# clear ACC, C and jump testers
     @jmsStack = ();
-    printf ("	%3o run	********\n", $pc) if $opt_l;
+    $running = 1;
+    printf ("	%3o run *********\n", $pc) if $opt_l;
     if ($opt_m) {
 	$t0 = [gettimeofday];
     }
     ########################################################################
     #   Start execution with instruction at $pc
     ########################################################################
-    while (($instr = $num = $mem[$pc]) != 0) {		# fetch instruction
+    while (($instr = $num = $mem[$pc]) != 0) {		# fetch instruction (0 is HLT)
 	$op = ($instr & 076000) >> 10;			# op code
+	$mr = $num & 0777;				# direct memory reference
 	########################################################################
-	#   Get memory reference (may be indirect)
+	#   Check for indirect memory reference
 	########################################################################
-	my $n = 0;					# indirect counter
-	while (defined($mr = $num & 0777)) {		# defined always true
-	    ########################################################################
-	    #   Check for watch point (except for JMP instructions)
-	    ########################################################################
-	    if ($op >= 010 and $breaks[$mr]) {
-		printf "watch point mr = %03o at pc = %03o\n", $mr, $pc;
-		$loc = $mr;
-		debug(2, $op, $mr);
-	    }
-	    last unless $num & 01000;
+	for ($n = 0; $num & 01000; $mr = $num & 0777) {
 	    if ($op < 010) {
-		$jmsFlag = ($jmsCall == ($num & 0777));
+		$jmsFlag = ($jmsCall == $mr);
 		$next = $pc + 1;			# a possible JMS return
 	    }
 	    $num = $mem[$mr];				# @ indirect memory reference
 	    if ($n++ > 10) {
 		$num = sprintf "%o", $mr;
 		warn "*** EXEC ERROR: very long indirect loop at LOC $num\n";
-		return;
+		goto stopRun;
+	    }
+	}
+	$opttx = $optlx || ($optnx && ($break || $breaks[$pc] ||		# trace at break point
+		($breaks[$mr] && ($opTrace[$op]) ||				# or before watch point
+		 $breaks[$pc+1] && ($ocTrace[($mem[$pc+1] & 076000) >> 10]))));	# or before conditional jmp
+	if ($opt_l or $opttx) {
+	    printf ("	%3o %05o %3s %s%03o", $pc, $instr, $opNames[$op], $instr & 01000 ? "@" : "", $instr & 0377);
+	}
+	$mv = $mem[$mr];				# value at $mr before execution for watch point check
+	#### trace before execution ############################################
+	if ($opttx) {
+	    if ($opTrace[$op]) {			# ignore JMP and Print instructions for trace
+		printf ($traceFormat, "\t", $mem[0777], $mem[0], $mr, $mv);
+	    } elsif ($op == 037) {
+		printf("\t\"%s\"", convString($mr, 1));# PRF trace dressed format string
 	    }
 	}
 	########################################################################
 	#   Check for breakpoint
 	########################################################################
 	if ($break or $breaks[$pc]) {
-	    printf "break point at pc = %03o\n", $pc;
 	    $loc = $pc;
+	    print "\n" if $opt_l or $opttx;
 	    debug(1, $op, $mr);
-	}
-	if ($abort) {
-	    $abort = 0;					# set in debug() or KEY input instructions
-	    return;
-	}
-	#### trace #############################################################
-	if ($opt_l) {
-	    printf ("	%3o %05o %3s %s%03o", $pc, $instr, $opNames[$op], $instr & 01000 ? "@" : "", $instr & 0777);
-	    if ($op < 030 and $op >= 010) {		# ignore I/O and JMP instructions for trace
-		if ($opt_d) {
-		    printf ("	C %d ACC %5d L1 %5d MR %5d", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-		} elsif ($opt_o) {
-		    printf ("	C %d ACC %05o L1 %05o MR %05o", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-		} elsif ($opt_x) {
-		    printf ("	C %d ACC %04x L1 %04x MR %04x", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-		} elsif ($opt_b) {
-		    printf ("	C %d ACC %015b L1 %015b MR %015b", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-		}
-	    } else {
-		printf "\n";				# terminate trace before I/O and JMP instructions
-	    }
+	    goto stopRun if $abort;			# may be set in debug()
+	    print "\t\t\t   " if $opttx and $opTrace[$op];
+	} elsif ($opt_l and not ($opttx and $opTrace[$op])) {
+	    print "\n";					# terminate trace before JMP and Print instructions
 	}
 	########################################################################
 	#   Exeute instruction
 	########################################################################
 	$pc++;						# next instruction (unless modified by JMP)
 	$opSubs[$op]->();				# execute op code (all op's exist) with resolved $mr
-	#### trace #############################################################
+	goto stopRun if $abort;				# may be set in KDN, KDD, KCH or KCS
 	if ($next) {
 	    if ($next != $pc) {				# is jump to next instruction ?
 		if ($jmsFlag) {				# no - jump was true and jumped somewhere else
@@ -949,23 +1512,26 @@ sub run {
 	    }
 	    $next = 0;
 	}
-	if ($opt_l and $op < 030 and $op >= 010) {	# ignore I/O and JMP instructions for trace
-	    if ($opt_d) {
-		printf (" ==> C %d ACC %5d L1 %5d MR %5d", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-	    } elsif ($opt_o) {
-		printf (" ==> C %d ACC %05o L1 %05o MR %05o", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-	    } elsif ($opt_x) {
-		printf (" ==> C %d ACC %04x L1 %04x MR %04x", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-	    } elsif ($opt_b) {
-		printf (" ==> C %d ACC %015b L1 %015b MR %015b", $mem[0777], $mem[0], $mem[1], $mem[$mr]);
-	    }
-	    printf "\n";
+	#### trace after execution #############################################
+	if ($opttx and $opTrace[$op]) {			# ignore JMP and Print instructions for trace
+	    printf ($traceFormat, " ==> ", $mem[0777], $mem[0], $mr, $mem[$mr]);
+	    print "\n";
+	}
+	########################################################################
+	#   Check for watch point change of value at $mr
+	########################################################################
+	if ($breaks[$mr] and $opTrace[$op] and $mv != $mem[$mr]) {
+	    $loc = $mr;
+	    debug(2, $op, $mr);
+	    goto stopRun if $abort;			# may be set in debug()
 	}
     }
     ########################################################################
     #   Exeution finished - reached HLT instruction
     ########################################################################
-    printf ("	%3o HLT	********\n", $pc - 1) if $opt_l;
+    printf ("	%3o ***** HLT ***\n", $pc) if $opt_l;
+  stopRun:
+    $running = 0;
     if ($opt_m) {
 	$t1 = [gettimeofday];
 	$sec =  $t1->[0] - $t0->[0];
@@ -1002,7 +1568,7 @@ sub JZR {		# 004000
 sub JNR {		# 006000
     $pc = $mr if $jtA != 0;
 } # JNR
-                        
+
 
 sub JZC {		# 010000
     $pc = $mr if $jtC == 0;
@@ -1019,7 +1585,7 @@ sub JEZ {		# 014000
 sub JBN {		# 016000
     $pc = $mr if $jtA != 0 and $jtC != 0;
 } # JBN
-                        
+
 
 sub AND {		# 020000
     $jtA = $mem[0] &= $mem[$mr];	# and accumulator (carry not affected)
@@ -1029,7 +1595,9 @@ sub ADD {		# 022000
     $jtA = $mem[0] + $mem[0777] + $mem[$mr];	# add to accumulator and carry
     if ($jtA & ~077777) {		# overflow ?
 	$jtA &= 077777;			# yes - mask accumulator
-	$jtC = $mem[0777] ^= 000001;	# complement carry
+	$jtC = $mem[0777] = 1;		# set carry
+    } else {
+	$jtC = $mem[0777] = 0;		# clear carry
     }
     $mem[0] = $jtA;
 } # ADD
@@ -1038,7 +1606,9 @@ sub SUB {		# 024000
     $jtA = $mem[0] + ($mem[0777] ^ 1) + ($mem[$mr] ^ 077777);	# add twos complement to accumulator and carry
     if ($jtA & ~077777) {		# overflow ?
 	$jtA &= 077777;			# yes - mask accumulator
-	$jtC = $mem[0777] ^= 000001;	# complement carry
+	$jtC = $mem[0777] = 0;		# clear carry
+    } else {
+	$jtC = $mem[0777] = 1;		# set carry
     }
     $mem[0] = $jtA;
 } # SUB
@@ -1052,7 +1622,7 @@ sub CMP {		# 026000
 	$jtC = 0;
     }
 } # CMP
-                        
+
 
 sub LDA {		# 030000
     $jtA = $mem[0] = $mem[$mr];		# load accumulator
@@ -1105,7 +1675,7 @@ sub DEC {		# 046000
     }
     $mem[$mr] = $jtA;
 } # DEC
-                        
+
 
 sub ROL {		# 050000	# shift operators should not operate on carry
     $jtA = ($mem[$mr] << 1) + $mem[0777];
@@ -1132,96 +1702,127 @@ sub SWP {		# 056000
     $jtA = (($tmp = $mem[$mr]) & 0177) << 8;
     $mem[$mr] = $jtA += $tmp >> 8;
 } # SWP
-                        
+
 
 sub KDN {		# 060000
-    print "\n";
+    print "\n" if $opttx;
+    my $prompt = ($tmp = $mem[0776] & 0777)
+		   ? convString($tmp, 0)
+		   : "Enter a short number";
   RepeatKDN:
-    $_ = $term->readline("Enter a short number: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
+    $_ = $term->readline("$prompt: ");
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
     $jtA = +$_;
     $jtA = oct $jtA if $jtA =~ m/^0/;
     if ($jtA > 077777 or $jtA < ~037777) {
 	warn "*** ERROR: short number must be <= 32,767 or >= -16384\n";
+	$prompt = "Try again";
 	goto RepeatKDN;
     }
     $mem[$mr] = $jtA & 077777;
+    print "\t\t\t   " if $opttx;
 } # KDN
 
 sub KDD {		# 062000
-    print "\n";
+    print "\n" if $opttx;
+    my $prompt = ($tmp = $mem[0776] & 0777)
+		   ? convString($tmp, 0)
+		   : "Enter a long number";
   RepeatKDD:
-    $_ = $term->readline("Enter a long number: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
+    $_ = $term->readline("$prompt: ");
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
     $jtA = +$_;
     $jtA = oct $jtA if $jtA =~ m/^0/;
     if ($jtA > 07777777777 or $jtA < ~03777777777) {
 	warn "*** ERROR: long number must be <= 1,073,741,823 or >= -536,870,912\n";
+	$prompt = "Try again";
 	goto RepeatKDD;
     }
     $mem[$mr] = $jtA & 077777;		# long number
     $mem[$mr+1] = ($jtA >> 15) & 077777;
+    print "\t\t\t   " if $opttx;
 } # KDD
 
 sub KCH {		# 064000
+    print "\n" if $opttx;
     ReadMode('cbreak');
     my $byte = ReadKey(0);			# single character from keyboard (stdin)
-    if (not defined $byte or ord($byte) == 04) { ReadMode('normal'); print "\n"; $abort = 1; return; }	# ctrl D
-    print $byte;			# echo
-    $jtA = $mem[$mr] = ord $byte;
+    if (not defined $byte or ord($byte) == 04) { ReadMode('normal'); print "\n"; $abort = 1; return; }	# ctrl-D
+    $jtA = $mem[$mr] = ord $byte;		# do not echo single character input
     ReadMode('normal');
+    print "\t\t\t   " if $opttx;
 } # KCH
 
 sub KCS {		# 066000
-    my ($num, $byte, $byte0, $bs);
-    print "\n";
-    $_ = $term->readline("Enter a text string: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl D
-    $byte0 = $bs = $jtA = 0;
-    foreach $byte (split //, $_) {
-	$jtA = 1 if $byte ne "0";
-	$byte = ord($byte);
+    print "\n" if $opttx;
+    my ($num, $char, $bs, $byte, $char0, $bs0, $byte0);
+    my $ms = $mr;
+    my $prompt = ($tmp = $mem[0776] & 0777)
+		   ? convString($tmp, 0)
+		   : "Enter a text string";
+  RepeatKCS:
+    $_ = $term->readline("$prompt: ");
+    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
+    $char0 = '';
+    $byte0 = $bs0 = $bs = $jtA = 0;
+    foreach $char (split //, $_) {
+	$byte = ord($char);
 	if ($bs) {
 	    if ($byte == 0156) {
-		$byte = 012;	# "\n"  LINE FEED
+		$byte = 012;				# "\n"  LF
 	    } elsif ($byte == 0164) {
-		$byte = 011;	# "\t"  TAB
+		$byte = 011;				# "\t"  HT
 	    }
 	} elsif ($byte == 0134) {
-	    $bs = 1;		# '\'
+	    $bs   = 0134;				# '\'
 	    next;
+	} elsif ($byte == 011) {
+	    $char = "\\t";				# real HT display as '\t'
 	}
-	$bs = 0;		# all other chars following '\' unchanged
 	if ($byte0) {
 	    if ($mr >= 0776) { goto KCSERR0; }
 	    $num = (($byte & 0177) << 8) + ($byte0 & 0177);
-	    printf("	%03o	%05o	%c %c\n", $mr, $num, $byte0, $byte) if $opt_l;
+	    printf("	%03o	%05o	%c%s %c%s\n", $mr, $num, $bs0, $char0, $bs, $char) if $opttx;
 	    $mem[$mr++] = $num;
 	    $byte0 = 0;
+	    $char0 = '';
+	    $bs0   = 0;
 	} else {
 	    $byte0 = $byte;
+	    $char0 = $char;
+	    $bs0   = $bs;
 	}
+	$bs = 0;					# all other chars following '\' unchanged
     }
     if ($mr >= 0776) { goto KCSERR0; }
     $num = ($byte0 & 0177);
-    printf("	%03o	%05o	%c\n", $mr, $num, $byte0) if $opt_l;
-    $mem[$mr] = $num;
+    printf("	%03o	%05o	%c%s\n\t\t\t   ", $mr, $num, $bs0, $char0) if $opttx;
+    $mem[$mr] = $num;					# last terminating word
+    $jtA = (($tmp = $mem[$ms]) != 0 && $tmp != 060);	# "" or "0" but not "00" are false
     return;
   KCSERR0:
-    $num = sprintf "%o", $mr;
-    warn "*** ERROR: String will overflow memory at loc $num - exit\n";
-    exit;
+    warn "*** ERROR: String will overflow memory\n";
+    $prompt = "Try again with a shorter string";
+    $mr = $ms;
+    goto RepeatKCS;
 } # KCS
-                        
+
 
 sub PDN {		# 070000
-    printf "%d", $jtA = $mem[$mr];	# print single precision unsigned number
+    $jtA = $mem[$mr];			# single precision unsigned number
+    if ($jtA & 040000 & $mem[0776]) {
+	$jtA |= -040000;		# extend sign for short signed number
+    }
+    printf "%d\n", $jtA;		# print single precision number
 } # PDN
 
 sub PDD {		# 072000
     $jtA = $mem[$mr++];
-    $jtA += $mem[$mr] << 15;
-    printf "%ld", $jtA;			# print double precision unsigned number
+    $jtA += $mem[$mr] << 15;		# double precision unsigned number
+    if ($jtA & 04000000000 & ($mem[0776] << 15)) {
+	$jtA |= -04000000000;		# extend sign for long signed number
+    }
+    printf "%ld\n", $jtA;		# print double precision number
 } # PDD
 
 sub PCH {		# 074000
@@ -1229,20 +1830,22 @@ sub PCH {		# 074000
 } # PCH
 
 sub PRF {		# 076000
-    my ($num, $sign, $byte, $i);
+    my ($num, $sign, $format, $i);
     my @nums = ();			# print string with optional numeric printf %d formats
     $jtA = $mem[$mr];			# 0 if argument is NULL string ""
-    for (;;) {
-	$num = $mem[$mr++];
-	last if ($byte = $num & 0177) == 0;
-	push @nums, sprintf "%c", $byte;
-	last if ($byte = ($num & 077600) >> 8) == 0;
-	push @nums, sprintf "%c", $byte;
-    }
-    my $format = join "", @nums;	# format string parameter
+    $format = convString($mr, 0);	# raw string
     $i = 1;
     @nums = ();
-    while ($format =~ m/(%([# +-]?)(\d+)?(\.\d+)?(l?)([dDuUboOxX]))/g) {
+    while ($format =~ m/
+	    (				# $1
+		%
+		([# +-]?)		# $2
+		(\d+)?			# $3
+		(\.\d+)?		# $4
+		(l?)			# $5
+		([csdDuUboOxX])		# $6
+	    )
+	/gx) {
 	$tmp = $mem[$pc++];			# fetch address of next number parameter
 	while (defined($mr = $tmp & 0777) and $tmp & 01000) {
 	    $tmp = $mem[$mr];		# @ indirect memory reference
@@ -1252,20 +1855,26 @@ sub PRF {		# 076000
 		return;
 	    }
 	}
-	if ($5 or $6 eq "D" or $6 eq "U" or $6 eq "O") {	# or "ld" etc
-	    $num = $mem[$mr];		# double precision number
-	    $num += $mem[$mr+1] << 15;
-	    $sign = -04000000000;
+	if ($6 eq 'c') {
+	    $num = $mem[$mr] & 0177;	# %c	single character
+	} elsif ($6 eq 's') {
+	    $num = convString($mr, 0);	# %s	raw string
 	} else {
-	    $num = $mem[$mr];		# single precision number
-	    $sign = -040000;
+	    $num = $mem[$mr];		# %d %D %u %U %b %o %O %x %X or %ld etc
+	    if ($5 or $6 eq 'D' or $6 eq 'U' or $6 eq 'O') {
+		$num += $mem[$mr+1] << 15;	# %D %U %O or "ld" etc
+		$sign = -04000000000;		# double precision number
+	    } else {
+		$sign = -040000;	# %d etc  single precision number
+	    }
+	    if (($6 eq 'd' or $6 eq 'D') and ($num & $sign)) {
+		$num |= $sign;		# sign extend signed negative number
+	    }
 	}
-	if (($6 eq "d" or $6 eq "D") and $num & $sign) {
-	    $num |= $sign;		# sign extend signed negative number
-	}
-	push @nums, $num;		# collect numeric parameter for each %d etc format element
-	printf("%d '%s'	pc = %3o mr = %3o num = %d\n", $i, $1, $pc - 1, $mr, $num) if $opt_l;
+	push @nums, $num;		# collect parameters for each %d etc format element
+	printf("\t%03o   %03o\t\t%2d %s\t'%s'\n", $pc-1, $mr, $i, $1, $6 eq 'c' ? chr $num : $num) if $opttx;
 	$i++;
     }
-    printf $format, @nums;		# uses perl printf for output of collected numbers
+    printf $format, @nums;		# use perl printf for output of collected elements
+    print "\n" if ($opt_l or $opttx) and $format !~ m/\n$/;
 } # PRF
