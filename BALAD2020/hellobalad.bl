@@ -1,0 +1,7 @@
+#!/usr/bin/balad
+;	$Id: hellobalad.bl 1.1 $
+
+main:	PRF hello
+	HLT
+
+hello:	"hello world of the Beginners Assembly Language and Debugger\n"

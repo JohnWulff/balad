@@ -1,0 +1,83 @@
+#!/usr/bin/balad
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;  $Id: multiplySub.bl 1.1 $
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;  Main program calling JMS multiply
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 100
+main:	KDN multcd	; Enter multiplicand
+	JZR 0	;   quit program if zero
+	KDN multpl	; Enter mmultiplyer
+	CLR ACC		; zero remainder
+	JMS mul		; multply
+	PRF fmt		; print "xx * yy = result\n"
+	ADR multcd	; multiplicand address
+	ADR multpl	; multiplyer address
+	ADR ACC		; double precision result address
+	JMP main
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;  Format string for PRF command
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+fmt:	"%d * %d = %ld\n"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;  Simple multiply subroutine using rotate right of the multiplyer and
+;  repeated addition of the left shifted multiplicand for every bit of
+;  the multiplyer
+;	JMS multiply
+;	ACC	rem	; remainder from division added to result - lost
+;	L2	multcd:	; single precision multiplicand	- not lost
+;	L3	multpl:	; single precision multiplier	- not lost
+;	    L4	mulclo:	; temp lo multiplicand to shift left
+;	    L5	mulchi:	; temp hi multiplicand to shift left
+;	    L6	multyr:	; temp lo multiplyer to shift right
+;	    L7	savac:	; temp save ACC
+;	ACC,L1	 	; double precision result
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 1		; temporary variables
+L1:	0
+multcd:	0		; single precision multiplicand
+multpl:	0		; single precision multiplier
+mulclo:	0		; temp lo multiplicand to shift left
+mulchi:	0		; temp hi multiplicand to shift left
+multyr:	0		; temp lo multiplyer to shift right
+savac:	0		; temp save ACC
+
+	LOC 200
+mul:	0		; return address
+	STA savac	; save rem
+	LDA multcd
+	STA mulclo	; lo multiplicand
+	CLR mulchi	; clear hi multiplicand
+	LDA multpl
+	STA multyr	; multiplyer
+	LDA savac	; lo part of result initially rem
+	CLR L1		; hi part of result initially zero
+loop:  	TST multyr	; is multiplyer all 0's ?
+	JZR @mul	; yes - return
+	CLR C
+	ROR multyr	; next bit of multiplyer
+	JZC skip
+	CLR C
+	ADD mulclo	; double precision add to result
+	STA savac	; save ACC
+	LDA L1		; hi result
+	ADD mulchi	; add shifted hi multiplicand to hi result
+	STA L1
+	LDA savac	; restore ACC
+skip:	CLR C
+	ROL mulclo
+	ROL mulchi	; double precision shift left of multiplicand
+	JMP loop

@@ -1,0 +1,20 @@
+#!/usr/bin/balad
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;	Test infinite indirect loop in BALAD
+;	$Id: infinite.bl 1.1 $
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	LOC 10
+xx:	ADR @yy
+yy:	ADR @xx		; infinite indirect loop
+
+	LOC 20
+direct:	"break the following infinite look by keying ctrl-\\\n"
+
+	LOC 100
+main:	PRF direct
+	PDN @xx
+	HLT
