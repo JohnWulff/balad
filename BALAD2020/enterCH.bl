@@ -2,54 +2,50 @@
 ########################################################################
 #
 #	Test program for KCH instruction (no echo)
-;	$Id: enterCH.bl 1.1 $
+#	$Id: enterCH.bl 1.2 $
 #
 ########################################################################
 
 	LOC 770
-tmp:	BLK 5		; room for 9 bytes of string
+tmp:	BLK 6		; room for 11 bytes of string
 
 	LOC 10
 string:	ADR tmp
-limit:	0775
+limit:	ADR tmp+6
 pointr:	BLK 1
 word:	BLK 1
-count:	BLK 1
 entry:	"Enter a string of characters: "
 overfl:	"\nMemory overflow at pointr %#o\n"
 LF:	"\n"
 
 main:	LDA string	; start at non default location
 	STA pointr
-	TCS entry
-	CLR count
+	PRF entry	; "Enter a string of characters: "
 next:	KCH 0		; enter a charcter
-	TCH 0		; echo input
+	PCH 0		; echo input
 	CMP LF
 	JZR even
 	STA word
-	INC count
 	KCH 0		; enter another character
-	TCH 0		; echo input
+	PCH 0		; echo input
 	CMP LF
 	JZR odd
 	SWP 0
 	ADD word
 	STA @pointr
-	INC count
 	INC pointr
-	LDA limit
-	CMP pointr
-	JGE next
-	TCS overfl
+	LDA pointr
+	CMP limit
+	JLT next
+	PRF overfl	; "\nMemory overflow at pointr %#o\n"
 	ADR pointr
 	HLT
 odd:	LDA word	; last odd charcter and terminating NULL
 	JMP out
 even:	CLR 0		; terminating NULL after even
 out:	STA @pointr
-	TCS tmp
-	TCS LF
-	TST count	; exit on zero length entry
+	PRF tmp
+	PCH LF
+	TST @string	; exit on zero length entry
 	JNR main
 	HLT

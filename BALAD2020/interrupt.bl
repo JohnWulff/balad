@@ -1,15 +1,14 @@
 #!/usr/bin/balad
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;
-;	Test runaway BALAD code and interrupt key ctrl-\ (signal QUIT)
-;	$Id: interrupt.bl 1.1 $
-;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+########################################################################
+#
+#	Test runaway BALAD code and interrupt key ctrl-\ (signal QUIT)
+#	$Id: interrupt.bl 1.2 $
+#
+########################################################################
 
 	LOC 100
 main:	PRF messg	; force a break with ctrl-\ key
 	JMP .		; infinite loop
 
-messg:	"force a break of the infinite loop with the ctrl-\ key\n"
-
+messg:	"force a break of the infinite loop with the ctrl-\\ key\n"

@@ -1,20 +1,61 @@
 #!/usr/bin/balad
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;
-;	Test infinite indirect loop in BALAD
-;	$Id: infinite.bl 1.1 $
-;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+########################################################################
+#
+#	Test direct and indirect infinite loop in BALAD
+#	$Id: infinite.bl 1.2 $
+#
+########################################################################
 
 	LOC 10
-xx:	ADR @yy
-yy:	ADR @xx		; infinite indirect loop
-
-	LOC 20
-direct:	"break the following infinite look by keying ctrl-\\\n"
+xx:	ADR @yy		; infinite indirect loop
+yy:	ADR @xx
 
 	LOC 100
-main:	PRF direct
-	PDN @xx
-	HLT
+main:	PRF msg1	; instruction messages
+	PRF msg2
+	PRF msg3
+	PRF msg4
+	PRF msg5
+	PRF msg6
+
+loop:	PRF prompt	; "Enter 'd', 'i' or ('q'): "
+	KCH ACC		; enter a character
+	PCH ACC		; echo the character
+
+	CMP nl		; is it '\n' ?
+	JEQ halt	; yes - NL also halts the program
+	PCH nl
+
+	CMP ASC_d	; is it 'd' ?
+	JEQ infDir	; yes - do direct infinite loop
+
+	CMP ASC_i	; is it 'i' ?
+	JEQ infInd	; yes - do indirect infinite loop
+
+	CMP ASC_q	; is it 'q' ?
+	JEQ halt	; yes - halt the program
+
+	PRF errMsg	; no  - "? %c - try again\n"
+	ADR ACC		; error character
+	JMP loop
+
+infDir:	JMP .		; direct infinite loop - break with ctrl-\
+			; then quit program at break point with q
+
+infInd:	CLR @xx		; indirect infinite loop
+			; will exit BALAD with an EXEC ERROR
+
+halt:	HLT
+
+ASC_d:	"d"
+ASC_i:	"i"
+ASC_q:	"q"
+nl:	"\n"
+msg1:	"\nSelect 'direct infinite loop' with 'd'.\n"
+msg2:	"  This can only be broken by forcing a break with the ctrl-\\ key,\n"
+msg3:	"  which sends the QUIT signal, that lands you at a break point.\n"
+msg4:	"  Quit program with 'q'\n  or run it again with 'a' followed by 'r'\n\n"
+msg5:	"Alternatively select 'indirect infinite loop' with 'i',\n"
+msg6:	"  which will exit after 10 iterations with an EXEC ERROR.\n\n"
+prompt:	"Enter 'd', 'i' or ('q'): "
+errMsg:	"? %c - try again\n"
