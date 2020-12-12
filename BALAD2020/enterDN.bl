@@ -1,8 +1,8 @@
 #!/usr/bin/balad
-;	$Id: enterDN.bl 1.1 $
+;	$Id: enterDN.bl 1.2 $
 	LOC 10
 tmp:	BLK 1
 	LOC 100
-loop:	KDN tmp
+main:	KDN tmp
 	TDN tmp
-	JMP loop
+	JMP main

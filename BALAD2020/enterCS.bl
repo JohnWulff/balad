@@ -1,9 +1,9 @@
 #!/usr/bin/balad
-;	$Id: enterCS.bl 1.1 $
+;	$Id: enterCS.bl 1.2 $
 	LOC 760
 tmp:	BLK 13
 
 	LOC 100
-loop:	KCS tmp
+main:	KCS tmp
 	TCS tmp
-	JMP loop
+	JMP main

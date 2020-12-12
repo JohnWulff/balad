@@ -10,31 +10,7 @@
 #
 #  Reverse Polish Notation Calculator 'GEORGE'
 #
-#	0-9	Enter a number terminated by white space or an operator
-#		at which point the number is pushed on the stack.
-# 	0-7	a number starting with 0 is octal (0-7 only).
-# 	0-7 a-f	a number starting with 0x is hexadecimal (0-9a-f).
-# 	0-1	a number starting with 0b is binary (0-1 only).
-#	+ - * /	arithmetic operators which act on the last two numbers
-#		popped from the stack. Result is pushed back on the stack.
-#		Error if there are less than two values on the stack.
-#	n	negate the last number on the stack.
-#	Enter	display numbers on the stack as signed decimal. The last
-#		results are left on the stack unless cleared with 'c'.
-#	d	display numbers on the stack as signed decimal numbers
-#		before any further operations.
-# 	o x b	display numbers on the stack in octal, hexadecimal or
-#		binary notation before any further operations.
-#	C	clear the stack.
-#	E	ENTER a number or duplicate the last number on the stack
-#	D	Drop the last number on the stack.
-#	S	Swap the last two numbers on the stack.
-#	R	Roll the stack - move last number to the top of the stack.
-#	q	quit the RPN calculator.
-#
-#	30 bit signed decimal arithmetic is used, which means all
-#	intermediate absolute values must be less than ~536 million.
-#	Arithmetic overflow and divide by zero errors are reported.
+#	see help text at the end of the file for a full description 
 #
 #  Historical Note: I wrote my first computer program in 1957 for a
 #  Reverse Polish Notation Calculater called 'GEORGE', which ran as an
@@ -51,23 +27,22 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: george.bl 1.1 $
+#  $Id: george.bl 1.2 $
 #
 ########################################################################
 
 ######  Variables and constants  #######################################
 
-	LOC 1
+	LOC 2
 
-L1:	0		; HI part of DP accumulator
 dest:	0l		; double precision result
-src:	0l		; double precision src
-quotit:			; double precision quotient for div
 swpPfr:
-mulcnd:	0		; double precision multiplicand for simple mult
-swpPto:	0
-opOfs:
+src:	0l		; double precision src
+swpPto:
+quotit:			; double precision quotient for div
+mulcnd:	0l		; double precision multiplicand for simple mult
 swpP:
+opOfs:
 mulplr:	0		; single precision multiplier   for simple mult
 savACC:	0		; used in main swpNow and mult
 sign:	0		; used locally in add sub (mul div via setSgn tstSgn)
@@ -134,7 +109,7 @@ loop:	KCS expr	; grow expression upwards towards stack
 	LDA expADR	; expr[] address
 	STA expPTR	; word pointer first
 	JMS iniDig	; clear digits, hexFl -1, decimal base, C
-	JMP .+2		; skip first ROR - start with even byte of expr[0]
+	JMP gettok+1	; skip first ROR - start with even byte of expr[0]
 
 ########################################################################
 #  Get another byte token from the expression string
@@ -178,13 +153,12 @@ convrt:	STA savACC	; save accumulator
 	TST ACC		; is first digit '0' ?
 	JNR num1	; no
 	INC ACC		; yes
+	INC digits	; 1 - first '0' is a number, even by itself
 	STA hexFl	; 1 look for x or b after first digit 0
 	LDA D8
 	STA inBase	; change input base to octal for now
-	ADD ASC_0	; "8"
-	STA asBase	; as well as end of number range
-	INC digits	; 1 - first '0' is a number, even by itself
-	JMP gettok	; no need to convert first digit '0'
+	ADD ASC_0	; "8" is ascii base - end of number range
+	JMP stAsB	; no need to convert first digit '0'
 
 ########################################################################
 #  0 - 9 a - f  Build an unsigned integer in 'dest'
@@ -206,7 +180,7 @@ num1:	INC digits	; number is growing
 	LDA dest+1
 	STA mulcnd	; multiplicand
 	CLR mulcnd+1
-	LDA L1		; hi part of lo order multiplication
+	LDA ACC+1		; hi part of lo order multiplication
 	JMS mult
 	STA dest+1	; store hi part of number - TODO check for overflow
 	JMP gettok	; get next digit or next operator
@@ -223,17 +197,16 @@ notDig:	STA savACC	; save accumulator
 	LDA D16		; yes
 	STA inBase	; change input base to hexadecimal
 	LDA ASC_f_
-	STA asBase
-	JMP gettok	; 0x is a hex number - leave hexFl 0
+	JMP stAsB	; 0x is a hex number - leave hexFl 0
 
 tst_b:	CMP ASC_b	; yes - is this "b" ?
 	JNE notNum	; no
+	DEC hexFl	; hexFl now -1 means not hex; C is 1
+	CLR C		; C must be 0 for next digit
 	LDA D2		; yes
 	STA inBase	; change input base to binary
 	ADD ASC_0	; "2"
-	STA asBase
-	DEC hexFl	; hexFl now -1 means not hex; C is 1
-	CLR C		; C must be 0 for next digit
+stAsB:	STA asBase
 	JMP gettok	; 0b is a binary number
 
 ########################################################################
@@ -253,7 +226,7 @@ notNum:	CMP ASC_q	; "q"
 	JMS push	; Enter or duplicate number on stack
 	JMS iniDig	; clear digits, hexFl -1, decimal base, C
 	CLR showFl	; show stack after pushing a new number
-	JMP gettok	; Enter or dupicate number on stack
+	JMP gettok
 
 ########################################################################
 #  Push a newly built number unless already pushed
@@ -306,8 +279,7 @@ execOp:	JMS pop		; popped value to src and src+1
 	LDA funPAd	; address of function pointer list
 	ADD opOfs	; select offset for add sub mul or div
 	JMS @ACC	; execute the selected operation add sub mul div
-	JMS push	; push result from dest and dest+1
-	JMP gettok	; next token
+	JMP pushDs	; push result from dest and dest+1
 
 ########################################################################
 #  miscellaneous operators
@@ -317,8 +289,8 @@ test_n:	CMP ASC_n	; "n"
 	JNE test_D
 	JMS pop		; n negate last value on the stack
 	JMS negate	; DP negate destination
-	JMS push
-	JMP gettok
+pushDs:	JMS push	; push result from dest and dest+1
+	JMP gettok	; next token
 
 test_D:	CMP ASC_D	; "D"
 	JNE test_S
@@ -344,31 +316,31 @@ test_R:	CMP ASC_R	; "R"
 
 swpNow:	STA swpP	; share with mulplr and opOfs
 	LDA stackP
-	STA savACC
+	STA savACC	; save stack pointer
 	JMS pop		; last number on the stack (also checks empty stack)
-	LDA stackP	; last value now in 'dest'
+	LDA stackP	; last number now in 'dest'
 	CMP stackA
 	JLT swp1
 	PRF errMsg	; "? err\n"
 	JMP swp2	; restore stack
 
-swp1:	STA swpPfr	; share with mulcnd
+swp1:	STA swpPfr	; share with src
 	SUB D2
-	STA swpPto	; share with mulcnd+1
+	STA swpPto	; share with mulcnd
 	LDA swpP
 	STA stackP
 
-swpLp:	LDA @swpPfr
+swpLp:	LDA @swpPfr	; move numbers down on the stack
 	INC swpPfr
 	STA @swpPto
 	INC swpPto
 	LDA swpPfr
-	CMP stackP
+	CMP stackP	; until top for swap or roll is reached
 	JLT swpLp
 
-swp2:	JMS push
+swp2:	JMS push	; push last number on stack to hole further up the stack
 	LDA savACC
-	STA stackP
+	STA stackP	; restore stack pointer
 	JMP gettok
 
 ########################################################################
@@ -376,35 +348,31 @@ swp2:	JMS push
 ########################################################################
 
 test_d:	CMP ASC_d	; "d"	decimal
-	JNE test_o
-	JMP show
+	JEQ show
 
-test_o:	CMP ASC_o	; "o"	octal
-	JNE test_x
-	JMP show
+	CMP ASC_o	; "o"	octal
+	JEQ show
 
-test_x:	CMP ASC_x	; "x"	hexadecimal
-	JNE test_b
-	JMP show
+	CMP ASC_x	; "x"	hexadecimal
+	JEQ show
 
-test_b:	CMP ASC_b	; "b"	binary
-	JNE inpErr
-
-########################################################################
-#  d o x b Show intermediate results remaining in the stack
-########################################################################
-
-show:	STA fmtDP+2	; " %#ld" " %#lo" " %#lx" " %#lb"
-	JMS showSt
-	INC showFl	; no need to show stack again if terminated now
-	JMP gettok
+	CMP ASC_b	; "b"	binary
+	JEQ show
 
 ########################################################################
 #  Input error - RPN token not recognized
 ########################################################################
 
-inpErr:	PRF inpEms	; "? %c\n"
+	PRF inpEms	; "? %c\n"
 	ADR ACC		; token is character in the accumulator
+	JMP gettok
+
+########################################################################
+#  d o x b Show intermediate results remaining in the stack
+########################################################################
+
+show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
+	INC showFl	; no need to show stack again if terminated now
 	JMP gettok
 
 ########################################################################
@@ -413,9 +381,8 @@ inpErr:	PRF inpEms	; "? %c\n"
 
 expEnd:	TST showFl	; was output shown already
 	JNR loop	; yes - don't show again
-	LDA ASC_d	; restore decimal output
-	STA fmtDP+2	; " %#ld"
-	JMS showSt
+	LDA ASC_d	; no  - restore decimal output
+	JMS showSt	; " %#ld"
 	JMP loop	; get new RPN expression
 
 halt:	HLT
@@ -484,9 +451,11 @@ popOk:	LDA @stackP
 #  Show all results remaining on the stack
 #  This is done at the end of an input expression and for the d operation
 #  as well as the o, x and b output operations with base 8, 16 and 2
+#	arg1	ACC	; character d o x b replacing d in " %#ld"
 ########################################################################
 
 showSt:	0
+	STA fmtDP+2	; " %#ld" " %#lo" " %#lx" " %#lb"
 	LDA stackA	; stack address to temporary stack pointer in ACC
 	CLR C
 showNx:	CMP stackP
@@ -508,24 +477,24 @@ showEn:	PCH nl		; "\n"
 #	arg1	ACC	; value added to the result     - lost
 #	arg2	mulcnd	; double precision multiplicand	- lost
 #	arg3	mulplr	; single precision multiplier	- lost
-#	return	ACC,L1 	; double precision result
+#	return	ACC,ACC+1 	; double precision result
 #	    savACC	; temp save ACC is free in main before JMS mult
 #
 ########################################################################
 
 mult:	0		; ACC added to lo part of result
-	CLR L1		; hi part of result initially zero
+	CLR ACC+1		; hi part of result initially zero
 mulLp:	TST mulplr	; is multiplyer all 0's ?
-	JZR @mult	; yes - return DP result in ACC,L1
+	JZR @mult	; yes - return DP result in ACC,ACC+1
 	CLR C		; no
 	ROR mulplr	; next bit of multiplyer
 	JZC mulSkp	;  0  skip addition of multiplicand
 	CLR C		;  1  DP add to result
 	ADD mulcnd	; add shifted lo multiplicand to lo result
 	STA savACC	; save ACC
-	LDA L1		; hi result
+	LDA ACC+1		; hi result
 	ADD mulcnd+1	; add shifted hi multiplicand to hi result
-	STA L1
+	STA ACC+1
 	LDA savACC	; restore ACC
 mulSkp:	CLR C
 	ROL mulcnd	; double precision shift left of multiplicand
@@ -667,12 +636,12 @@ tstSgn:	0
 #				[   0  ]
 #	+		[destHI][destLO]
 #	*			[ srcLO]
-#	=		[  L1  ][  ACC ]	carry over partial result in L1
+#	=		[ ACC+1][   ACC]	carry over partial result in ACC+1
 #			    |	    |
 #			[   v  ]    |
 #	+	[   0  ][destLO]    |
-#	*		[ srcLO]    |
-#	=	[  L1  ][  ACC ]    |		L1 must be 0
+#	*		[ srcHI]    |
+#	=	[ ACC+1][   ACC]    |		ACC+1 must be 0
 #			    |	    |
 #	negate if	    v	    v		sign destHI ^ sign srcHI	
 #	=		[destHI][destLO]
@@ -680,22 +649,24 @@ tstSgn:	0
 
 mul:	0
 	JMS setSgn	; test sign of dest and src
-	LDA dest	; dest lo
+	LDA dest	; destLO
 	STA mulcnd
-	LDA dest+1	; dest hi
+	LDA dest+1	; destHI
 	STA mulcnd+1
-	LDA src		; src lo
+	LDA src		; srcLO
 	STA mulplr
 	CLR ACC
 	JMS mult
-	STA dest	; dest lo is now fixed
+	STA savACC	; save ACC
 
-	LDA dest	; dest lo
+	LDA dest	; destLO
 	STA mulcnd
 	CLR mulcnd+1
-	LDA src+1	; src hi
+	LDA src+1	; srcHI
 	STA mulplr
-	LDA L1		; transfer dest hi to next multiplication
+	LDA savACC	; restore ACC
+	STA dest	; reult in destLO is now fixed
+	LDA ACC+1		; add result hi to next multiplication
 	JMS mult
 	STA dest+1	; result complete unless overflow
 
@@ -766,12 +737,54 @@ div4:	LDA quotit	; remainder is in dest
 	JMS tstSgn	; negate dest if signs of dest and src differ
 	JMP @div
 
-######  Space for the expression  ######################################
+######  free for data  #################################################
 
-expr:	0		; expression filled upwards from here
+expr:	0		; RPN expression filled upwards from here
 
-######  Space for the stack  ###########################################
+######  Space for the expression and the stack  ########################
 
 	LOC 776		; stack filled downwards from here
 stack:	ADR prompt	; top of the stack (not overwritten via stackP)
 			; 776 is also place for user defined prompt address
+
+######  End of BALAD code  #############################################
+__END__			; help text
+  Reverse Polish Notation Calculator 'GEORGE'
+        0-9     Enter a number terminated by white space or an operator,
+                at which point the number is pushed on the stack.
+        0-7     A number starting with 0 is octal (0-7 only).
+        0-7 a-f A number starting with 0x is hexadecimal (0-9a-f).
+        0-1     A number starting with 0b is binary (0-1 only).
+        + - * / Arithmetic operators which act on the last two numbers
+                popped from the stack. Result is pushed back on the stack.
+                Error if there are less than two values on the stack.
+        n       NEGATE the last number on the stack.
+        Enter   display numbers on the stack as signed decimal.
+        d       display numbers on the stack as signed decimal numbers
+                before any further operations.
+        o x b   display numbers on the stack in octal, hexadecimal or
+                binary notation before any further operations.
+        E       ENTER a number on the stack if 'E' immediately follows
+                a number; else duplicate the last number on the stack.
+        D       DROP the last number on the stack.
+        S       SWAP the last two numbers on the stack.
+        R       ROLL the stack - move last number to the top of the stack.
+        C       CLEAR the stack.
+        q       QUIT the RPN calculator.
+
+        30 bit signed decimal arithmetic is used, which means all
+        intermediate absolute values must be less than ~536 million.
+        Arithmetic overflow errors for + and - are reported.
+        Divide by zero and stack underflow errors are reported.
+
+        There was not enough BALAD memory to check overflow for *
+        the multiply operator and overflow of the stack into the area
+        where the input expression is stored. 62 words are shared by
+        these data structures. If they use half each, there is room for
+        15 numbers on the stack at 2 words per number and an RPN
+        expression of 63 characters at 2 characters per word.
+
+        Also because of lack of memory the division algorithm is very
+        simple and very slow. Division of 536,000,000 by 1 takes over
+        an hour. For more reasonable numbers and larger divisors it works
+        well. For the same reason there is no modulo division operator.

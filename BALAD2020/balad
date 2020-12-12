@@ -300,15 +300,14 @@ my @debPrompts	= ( ">>", "B>", "W>" );			# debug() entry prompts
 my $named = $0;
 $named =~ s#.*[/\\]##;		# delete directory names in path
 my @argv1 = ();
-my @argv2 = ();
 my ($argv, $loc, $state, $pc, $mr, $tmp, $jR, $jC, $listMode, $lM, $listOfs, $lO, $abort, $cmr, $list, $listArgv);
 my @errorMsgs = ();
 
 format STDERR =
-Usage:  @<<<<[ -lt[doxb]cm
+Usage:  @<<<<[ -lt[doxb]cmh
         $named
-             [ -L[ <list_file>.bll]][ -O <out_file>.bl]
-             [ <source_file.bl> ...]|[ -h]
+             [ -L[ <list_file>]][ -O <out_file>]
+             [ -B[ <batch_file>]][ <file> ...]
         -l      list code output during assembly
         -t      trace code during execution
           -d    additionally  trace C, ACC and MR in decimal
@@ -322,10 +321,10 @@ Usage:  @<<<<[ -lt[doxb]cm
         -L <list_file> during assembly (default <source_file.bll>)
         -O <out_file>  during code entry (no default)
         -m      show execution time in microsecond resolution
-        -h      help, ouput this Usage text only
-        <source_file>  one or more balad source files (ext .bl).
-        Any file with ext .lst is interpreted as a list of files.
-$Id: balad 1.4 $
+        -h <file>   output the application help text if any
+        -h      output the BALAD and its debugger help text
+        <file>  one or more balad source files (ext .bl).
+$Id: balad 1.5 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -359,10 +358,16 @@ format STDOUT =
     c      CONTINUE execution until next break or watch point
     a      abort the current program - allow new run or enter
 
-        All other commands can be called in either mode.
-    q         QUIT balad
+        All other commands can be called in all modes.
+    O         output the source text to STDOUT
+    O <file>  output the source text to <file>
+    L         output the listing text to STDOUT
+    L <file>  output the listing text to <file>
     S         output the Symbol Table
-    h         output this HELP text
+    H         output the application Help text if any
+    h         output the BALAD debugger help text
+    q         QUIT balad
+
     *         set a BREAK or watch point at current location
     <n>*      set a BREAK or watch point at location <n>
     <n>,<m>*  set BREAK or watch points at locations <n> to <m>
@@ -391,17 +396,17 @@ format STDOUT =
         these apply to all other commands starting at * (set a BREAK)
     / or enter    list location(s) in current list mode
 
-    -     stop tracing code and data during execution
-    -t    trace code during execution
+    -t    trace code during execution.
       -d  additionally  trace C, ACC and MR in decimal
       -o  alternatively trace C, ACC and MR in octal
       -x  alternatively trace C, ACC and MR in hexadecimal
       -b  alternatively trace C, ACC and MR in binary
           In each case trace values before and after execution.
           Without -t trace only at break or watch points.
+    -     stop tracing code and data during execution.
 .
 
-use vars qw($opt_l $opt_t $opt_o $opt_d $opt_x $opt_b $opt_c $opt_L $opt_O $opt_m $opt_h);
+use vars qw($opt_l $opt_t $opt_o $opt_d $opt_x $opt_b $opt_c $opt_L $opt_O $opt_B $opt_m $opt_h);
 use Getopt::Long qw(:config no_ignore_case bundling);
 GetOptions (
     '<>'  => sub { push(@argv1, @_); },	# Transfer file argument to @argv1
@@ -414,15 +419,22 @@ GetOptions (
     'c'   => \$opt_c,
     'L:s' => \$opt_L,
     'O=s' => \$opt_O,
+    'B:s' => \$opt_B,
     'm'   => \$opt_m,
     'h'   => \$opt_h,
 );
+push(@argv1, @ARGV) if @ARGV;				# in case -- is used in command line
 
 if ($opt_h) {
-    write STDERR; write STDOUT; exit 0;	# -h, ouput Usage only
+    if (@argv1) {
+	appHelp();					# output application help text
+    } else {
+	write STDERR; write STDOUT;			# -h, ouput Usage only
+    }
+    exit 0;
 }
 
-push(@argv1, @ARGV) if @ARGV;				# in case -- is used in command line
+my $opttdoxb = $opt_t || $opt_d || $opt_o || $opt_x || $opt_b;
 my $optlx =  $opt_t && ($opt_o || $opt_d || $opt_x || $opt_b);
 my $optnx = !$opt_t && ($opt_o || $opt_d || $opt_x || $opt_b);
 my ($opttx, $traceFormat);
@@ -448,49 +460,41 @@ $SIG{PIPE} = \&interrupt;	# signal 13
 # Pass 1 - process labels only
 my $filesAssd	= 0;		# number of BALAD source files assembled
 $pair[0] = $loc = 0100;		# first default location
-while ($argv = shift @argv1) {
-    unless (open (IN, $argv)) {
+for (my $i = 0; $i <= $#argv1; $i++) {
+    $argv = $argv1[$i];
+    open IN, $argv or
 	die "can't open input file $argv";
-    }
-    if ($argv =~ /\.lst$/) {	# x.lst is a list of filenames
-	while (<IN>) {		# read next entry from x.lst into $_
-	    chomp;		# $_ is a filname entry out of x.lst
-	    push(@argv1, $_);	# put next filename on end of @argv1
-	}
-    } else {
-	if (defined $opt_L) {
-	    if ($opt_L eq "") {
-		if ($argv =~ m/^(\w+([\/\\]\w+)*)(\.\w+)?$/) {
-		    $opt_L = "$1.bll";		# set list file name from the first source file trunk
-		} else {
-		    $opt_L = "$argv.bll";	# set list file name from the first source file name
-		}
-	    }
-	    if ($opt_L eq $argv) {
-		warn "<list_file> should not overwrite source file '$argv'\n - define new -L <list_file> in debug\n";
-		$opt_L = '0';
+    if (defined $opt_L) {
+	if ($opt_L eq "") {
+	    if ($argv =~ m/^(\w+([\/\\]\w+)*)(\.\w+)?$/) {
+		$opt_L = "$1.bll";		# set list file name from the first source file trunk
+	    } else {
+		$opt_L = "$argv.bll";		# set list file name from the first source file name
 	    }
 	}
-	if (defined $opt_O and $opt_O eq $argv) {
-	    warn "<out_file> should not overwrite source file '$argv'\n - define new -O <out_file> in debug\n";
-	    $opt_O = '0';
+	if ($opt_L eq $argv) {
+	    warn "<list_file> should not overwrite source file '$argv'\n - define new -L <list_file> in debug\n";
+	    $opt_L = '0';
 	}
-	push(@argv2, $argv);	# file list for pass 2
-	$eF += assembleFile(1);	# Pass 1
-	$filesAssd++;
     }
+    if (defined $opt_O and $opt_O eq $argv) {
+	warn "<out_file> should not overwrite source file '$argv'\n - define new -O <out_file> in debug\n";
+	$opt_O = '0';
+    }
+    $eF += assembleFile(1);	# Pass 1
+    $filesAssd++;
     close(IN);
 }
 
 # Pass 2 - full assembly
-$loc = 0100;			# first default location
-while ($argv = shift @argv2) {
-    unless (open (IN, $argv)) {
+$loc = 0100;					# first default location
+for (my $i = 0; $i <= $#argv1; $i++) {
+    $argv = $argv1[$i];
+    open IN, $argv or
 	die "can't open input file $argv";	# unlikely - will have died in pass 1
-    }
     if ($filesAssd >= 2) {
 	print STDERR "$argv\n";
-	if ($list) {
+	if ($list > 2) {
 	    print LIST "$argv\n";
 	} else {
 	    $listArgv = $argv;
@@ -498,19 +502,19 @@ while ($argv = shift @argv2) {
     }
     $eF += assembleFile(2);	# Pass 2
     close(IN);
-    if ($opt_O) {
-	outText(0);				# output source
-    }
 }
 if ($list) {
     $listArgv = "";
     close(LIST);
+    $list = 0;
 }
 
 unless ($eF or $opt_c and $filesAssd) {
     ########################################################################
     #   Enter run and debugging commands
     ########################################################################
+    $opt_L = "-" unless $opt_L;	# listing to STDOUT
+    $opt_O = "-" unless $opt_O;	# file output to STDOUT
     $loc = 0100;		# first default location
     $listMode = $lM = 'c';	# list code initially
     $listOfs  = $lO = 1;	# list offset is 1
@@ -521,7 +525,7 @@ exit($eF);			# quit BALAD reporting errors
 
 ########################################################################
 #
-#	Catch and report stray signals
+#  Catch and report stray signals
 #
 ########################################################################
 
@@ -587,13 +591,41 @@ sub outSymTab {
 
 ########################################################################
 #
+#  Output application help
+#
+########################################################################
+
+sub appHelp {
+    for (my $i = 0; $i <= $#argv1; $i++) {
+	my $argv = $argv1[$i];
+	open IN, $argv or
+	    die "can't open input file $argv";
+	my $hf = 0;
+	while (<IN>) {					# input from file or stdin until EOF
+	    unless ($hf) {
+		$hf = 1 if m/^\s*q$/ or m/^\s*__END__/;	# end of code
+		next;					# ignore code for help output
+	    }
+	    print;					# display help text if any
+	}
+	unless ($hf) {
+	    print "$argv does not have any help text\n";
+	}
+    }
+}
+
+########################################################################
+#
 #  Output source or listing
-#	parameter1	lst: 0 output source; 1 output listing
+#	parameter1	lst:    0 output source; 1 output listing
+#	parameter2	fileNm: file name or "-" for STDOUT
 #
 ########################################################################
 
 sub outText {
-    my ($lst) = @_;
+    my ($lst, $fileNm) = @_;
+    $listArgv = "";
+    ListOpen($fileNm) unless $list;
     my ($p, $l, $arRef, $arLast, $i, $str, $end, $lj);
     for ($p = 0; $p <= $#groups; $p++) {
 	for ($l = $groups[$p][0]; $l < $groups[$p][1]; $l++) {
@@ -603,9 +635,9 @@ sub outText {
 		    $_ = $arRef->[$i];
 		    if ($lst) {
 			if ($i < $arLast or $l >= 01000) {
-			    printf "\t\t%s\n", $_;				# comment line only
+			    printf LIST "\t\t%s\n", $_;				# comment line only
 			} else {
-			    printf "  %03o\t%05o\t%s\n", $l, $mem[$l], $_;	# statement listing
+			    printf LIST "  %03o\t%05o\t%s\n", $l, $mem[$l], $_;	# statement listing
 			    if (m/^\s*([A-Za-z]\w*\s*:\s*)?"(.*)"(\s*[;#].*)?$/) {
 				$str = $2;			# string
 				$str =~ s/\\(.)/$1/g;		# count backslasched characters as 1
@@ -622,35 +654,42 @@ sub outText {
 				$end = $l + 1;			# 2nd word of DP number
 			      ExtendList:
 				for ($lj = $l + 1; $lj <= $end; $lj++) {
-				    printf "  %03o\t%05o\n", $lj, $mem[$lj];	# string or BLK data
+				    printf LIST "  %03o\t%05o\n", $lj, $mem[$lj];	# string or BLK data
 				}
 			    }
 			}
 		    } else {
-			printf "%s\n", $_;	# source line only
+			printf LIST "%s\n", $_;	# source line only
 		    }
 		}
 	    }
 	}
+    }
+    if ($list) {
+	close(LIST);
+	$list = 0;
     }
 } # outText
 
 ########################################################################
 #
 #  Open LIST file on first output
+#	parameter1	fileNm: file name or "-" for STDOUT
 #
 ########################################################################
 
 sub ListOpen {
-    if ($opt_L and not fileno LIST) {
-	unless (open (LIST, ">$opt_L")) {
-	    die "can't open list file '$opt_L' for writing";
-	}
-	$list = 1;
+    my ($fileNm) = @_;
+    if ($fileNm and not fileno LIST) {
+	open LIST, ">$fileNm" or
+	    die "can't open file '$fileNm' for writing";
+	$list = fileno LIST;
 	if ($listArgv) {
 	    print LIST "$listArgv\n";
 	    $listArgv = "";
 	}
+    } else {
+	$list = 0;
     }
 } # ListOpen
 
@@ -658,18 +697,18 @@ sub ListOpen {
 #
 #  List assembly output
 #    output List line to STDOUT
-#    output List line to LIST if $list is true ($opt_L corrrect)
+#    output List line to LIST if $list > 2 ($opt_L corrrect)
 #
 ########################################################################
 
 sub List {
     my ($msg) = @_;
-    ListOpen() unless $list;
+    ListOpen($opt_L) unless $list;
     print "$msg\n";
-    print LIST "$msg\n" if $list;
+    print LIST "$msg\n" if $list > 2;
     while (($msg = pop(@errorMsgs))) {
 	warn $msg;
-	print LIST $msg if $list;
+	print LIST $msg if $list > 2;
     }
 } # List
 
@@ -677,7 +716,7 @@ sub List {
 #
 #  Warn about assmbly errors
 #    output ERROR message to STDERR using warn()
-#    output ERROR message to LIST if $list is true ($opt_L corrrect)
+#    output ERROR message to LIST if $list > 2 ($opt_L corrrect)
 #	parameter1	ERROR message
 #	parameter2	false: delay if code line;
 #			1:     immediate output with file ref and line No
@@ -687,21 +726,21 @@ sub List {
 
 sub Error {
     my ($msg, $imm) = @_;
-    ListOpen() unless $list;
+    ListOpen($opt_L) unless $list;
     $tmp = sprintf "*** ERROR: %s at %s line %d\n", $msg, $argv, $.;
     if ($_ and not $imm) {
 	if ($opt_l) {
 	    push(@errorMsgs, $tmp);
 	} else {
 	    warn "\t\t\t$_\n$tmp";
-	    print LIST "$.\t$_\n$tmp" if $list;
+	    print LIST "$.\t$_\n$tmp" if $list > 2;
 	}
     } elsif ($imm == 1) {
 	warn $tmp;
-	print LIST $tmp if $list;
+	print LIST $tmp if $list > 2;
     } else {
 	warn "*** ERROR: $msg\n";		# $imm >= 2
-	print LIST "*** ERROR: $msg\n" if $list;
+	print LIST "*** ERROR: $msg\n" if $list > 2;
     }
 } # Error
 
@@ -757,17 +796,16 @@ sub assembleFile {
     my ($pass) = @_;
     my ($key);
     my $eFlg = 0;
-    print "Enter LOC and code or data interactively (q to return to debugger)\n\n\t" if $pass == 0;
     $state = 0;				# state 0 none  1 data  2 code
     if (defined fileno IN) {
 	while (<IN>) {					# input from file or stdin until EOF
 	    chomp;					# remove new line
-	    last if m/^\s*q$/;				# quit assembly
+	    last if m/^\s*q$/ or m/^\s*__END__/;	# quit assembly
 	    $eFlg += assembleLine($pass, $_);		# assemble a line
 	}
     } else {
 	while (defined ($_ = $term->readline(""))) {	# interactive input from keyboard until ctrl-d
-	    last if m/^\s*q$/;				# quit assembly
+	    last if m/^\s*q$/ or m/^\s*__END__/;	# quit assembly
 	    $eFlg += assembleLine($pass, $_);		# assemble a line
 	}
     }
@@ -1057,79 +1095,25 @@ sub assembleLine {
     ########################################################################
     #   End of one input line
     ########################################################################
-    if (($opt_l and $pass != 1) or defined $newLoc) {
-	########################################################################
-	#   Optionally list code or data produced - check for address error
-	########################################################################
-	print "==>" if defined $newLoc;				# for call from debug()
-	if (defined $val) {					# code or short number
-	    if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { $num = $loc; goto MemERR0; }
-	    $tmp = sprintf "  %03o\t%05o\t%s", $loc, $val, $_;
-	    List($tmp);
-	    if (defined $dval) {				# long double precision number
-		if ($loc + 1 > 0777 or ($pass >= 1 and $mem[$loc + 1])) { $num = $loc + 1; goto MemERR0; }
-		$tmp = sprintf "  %03o\t%05o\t(%#o)", $loc + 1, $dval, ($dval << 15) + $val;
-		List($tmp);
-	    }
-	} elsif (defined $str) {				# string
-	    $char0 = '';
-	    $byte0 = $bs = $i = 0;
-	    foreach $char (split //, $str) {
-		$byte = ord $char;
-		if ($bs) {
-		    if (defined($tmp = $ascii_cntrl{$char})) {
-			$char = $cntrl_slash{$tmp};		# "\n" => "\\n" should be defined
-			die "*** internal error - cntrl_slash hashes not correct ???" unless defined $char;
-			$byte = ord $tmp;			# \ n  => "\n"  etc
-		    }
-		} elsif ($char eq "\\") {
-		    $bs = 1;
-		    next;
-		}
-		$bs = 0;					# all other chars following '\' unchanged
-		$char = $tmp if defined ($tmp = $cntrl_slash{$char});	# "\n" => "\\n"
-		if ($byte0) {
-		    if ($loc + $i > 0777 or ($pass >= 1 and $mem[$loc + $i])) { $num = $loc + $i; goto MemERR0; }
-		    if ($i == 0) {
-			$tmp = sprintf "  %03o\t%05o\t%s\t%s %s\t\"%s\"", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $label, $char0, $char, $str;
-			List($tmp);
-		    } else {
-			$tmp = sprintf "  %03o\t%05o\t\t%s %s", $loc + $i++, (($byte & 0177) << 8) + ($byte0 & 0177), $char0, $char;
-			List($tmp);
-		    }
-		    $byte0 = 0;
-		    $char0 = '';
-		} else {
-		    $byte0 = $byte;
-		    $char0 = $char;
-		}
-	    }
-	    if ($loc + $i > 0777 or ($pass >= 1 and $mem[$loc + $i])) { $num = $loc + $i; goto MemERR0; }
-	    if ($i == 0) {
-		$tmp = sprintf "  %03o\t%05o\t%s\t%s\t\"%s\"", $loc + $i, ($byte0 & 0177), $label, $char0, $str;
-		List($tmp);
-	    } else {
-		$tmp = sprintf "  %03o\t%05o\t\t%s", $loc + $i, ($byte0 & 0177), $char0;
-		List($tmp);
-	    }
-	} elsif (defined $blk) {
-	    $tmp = sprintf "  %03o\t\t%s", $loc, $_;
-	    List($tmp);
-	} else {
-	    $tmp = sprintf "\t\t%s", $_;				# all other lines
-	    List($tmp);
-	}
-    }
     ########################################################################
     #   Store code or data in memory - check for address error
-    #   This section is missed if optional listing found an error
+    #   Optionally list code or data produced
     ########################################################################
+    my $optlpn = ($opt_l && $pass != 1) || defined $newLoc;
     if (defined $val) {						# single word of code or numeric data
 	if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	if ($optlpn) {
+	    $tmp = sprintf "  %03o\t%05o\t%s", $loc, $val, $_;
+	    List($tmp);
+	}
 	$mem[$loc] = $val if $pass != 1;
 	$loc++;
 	if (defined $dval) {					# high order word of numeric data
 	    if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	    if ($optlpn) {
+		$tmp = sprintf "  %03o\t%05o", $loc, $dval;
+		List($tmp);
+	    }
 	    $mem[$loc] = $dval if $pass != 1;
 	    $loc++;
 	}
@@ -1148,6 +1132,11 @@ sub assembleLine {
 	    $bs = 0;						# all other chars following '\' unchanged
 	    if ($byte0) {
 		if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+		if ($optlpn) {
+		    $tmp = sprintf "  %03o\t%05o", $loc, (($byte & 0177) << 8) + ($byte0 & 0177);
+		    $tmp .= sprintf "\t%s", $_ if $i++ == 0;
+		    List($tmp);
+		}
 		$mem[$loc] = (($byte & 0177) << 8) + ($byte0 & 0177) if $pass != 1;
 		$loc++;
 		$byte0 = 0;
@@ -1156,10 +1145,31 @@ sub assembleLine {
 	    }
 	}
 	if ($loc > 0777 or ($pass >= 1 and $mem[$loc])) { goto MemERR1; }
+	if ($optlpn) {
+	    $tmp = sprintf "  %03o\t%05o", $loc, ($byte0 & 0177);
+	    $tmp .= sprintf "\t%s", $_ if $i++ == 0;
+	    List($tmp);
+	}
 	$mem[$loc] = ($byte0 & 0177) if $pass != 1;
 	$loc++;
     } elsif (defined $locn) {
+	if ($optlpn) {
+	    if ($blk) {
+		$tmp = sprintf "  %03o\t00000\t%s", $loc++, $_;	# BLK
+		List($tmp);
+		while ($loc < $blk) {
+		    $tmp = sprintf "  %03o\t00000", $loc++;	# BLK rest
+		    List($tmp);
+		}
+	    } else {
+		$tmp = sprintf "\t\t%s", $_;			# LOC
+		List($tmp);
+	    }
+	}
 	$loc = $locn;						# LOC or BLK - no data stored
+    } elsif ($optlpn) {
+	$tmp = sprintf "\t\t%s", $_;				# all other lines
+	List($tmp);
     }
     if ($termErrFlg == 2) {
 	## code not recognised or improper code block termination ##############
@@ -1198,7 +1208,7 @@ sub assembleLine {
 	    @lines = ();
 	}
     }
-    if ($pass == 0 and $opt_l and not defined $newLoc) {
+    if ($pass == 0 and $opt_l and not defined $newLoc and $argv eq "keyboard input") {
 	if ($state == 0) {
 	    printf "\t";
 	} else {
@@ -1221,19 +1231,27 @@ sub assembleLine {
 
 sub debug {
     my ($mode, $op, $mr) = @_;
-    my ($listCmd, $lstart, $lfin, $l, $brkStar, $label, $sym, $stFlag, $num, $assIn);
+    my ($listCmd, $lstart, $lfin, $l, $brkStar, $label, $sym, $stFlag, $num, $assIn, $i);
     $running = 2 if $running;			# stop interrupt with ctrl-\ key in debug
     if ($mode == 0) {
-	if ($filesAssd != 0) {
-	    $argv = "keyboard input";
-	    if (defined($tmp = $symTable{'main'}) and
-		not ($opt_t or $opt_d or $opt_o or $opt_x or $opt_b)) {
+	$argv = "keyboard input";
+	if ($filesAssd) {
+	    if (defined($tmp = $symTable{'main'}) and not $opttdoxb) {
 		########################################################################
 		#  No essmbly errors in file(s) - run if main: defined and not -l -d -o -x -b
 		########################################################################
 		$pc = $loc = $tmp;		# start location defined in the assembled program
+		if (defined $opt_B or not -t STDIN) {
+		    if (not defined $opt_B or $opt_B eq "") {
+			$argv = "STDIN",
+			$opt_B = "-";
+		    }
+		    open IN, $opt_B or		# Batch data file
+			die "can't open $opt_B ???";
+		}
 		run();				# run the code immediately
-		exit() unless $abort;
+		close IN if $opt_B;
+		exit() unless $abort == 1;	# only break if stopped with ctrl-\
 	    } else {
 		########################################################################
 		#  else enter debugger
@@ -1243,16 +1261,23 @@ sub debug {
 	    }
 	} else {
 	    ########################################################################
-	    #  BALAD called without file argements - enter code for interactive assembly
+	    #  BALAD called without file arguments - enter code for interactive assembly
 	    #  uses STDIN to allow < file.bl in command line
 	    ########################################################################
-	    unless (open (IN, '-')) {		# STDIN	- no source file arguments
-		die "can't open STDIN ???";
+	    if (-t STDIN) {
+		$opt_l = 1;			# interactive input is best with listing
+		print "Enter LOC and code or data interactively (q to return to debugger)\n\n\t";
+	    } else {
+		open IN, "-" or			# STDIN	- no source file arguments
+		    die "can't open STDIN ???";
+		$argv = "STDIN";			# enter first code or data
 	    }
-	    $argv = "STDIN";			# enter first code or data
 	    my $eF = assembleFile(0);		# interactive pass 0
-	    close(IN);
-	    print("\n");
+	    if (-t STDIN) {
+		print("\n");
+	    } else {
+		close(IN);
+	    }
 	    exit($eF) if $opt_c;		# quit BALAD after compile check
 	}
     }
@@ -1268,10 +1293,10 @@ sub debug {
 	if (m/^\s*O(ut)?(\s+([A-Za-z]\w*(\.\w+)?))?$/) {
 	    $tmp = $3 ? $3 : $opt_O;
 	    if ($tmp and -e $tmp) {
-		$_ = $term->readline("List file $tmp exists, do you want to overwrite it ([y]n): ");
+		$_ = $term->readline("Output file $tmp exists, do you want to overwrite it ([y]n): ");
 		next unless m/^([yY])?$/;
 	    }
-	    outText(0);				# output source
+	    outText(0, $tmp);			# output source
 	    next;
 	}
 	if (m/^\s*L(ist)?(\s+([A-Za-z]\w*(\.\w+)?))?$/) {
@@ -1280,11 +1305,15 @@ sub debug {
 		$_ = $term->readline("List file $tmp exists, do you want to overwrite it ([y]n): ");
 		next unless m/^([yY])?$/;
 	    }
-	    outText(1);				# output listing
+	    outText(1, $tmp);			# output listing
 	    next;
 	}
 	if (m/^\s*S(ym)?$/) {
 	    outSymTab();			# output Symbol Table
+	    next;
+	}
+	if (m/^\s*H(elp)?$/) {
+	    appHelp();				# output application help text
 	    next;
 	}
 	if (m/^\s*h(elp)?$/) {
@@ -1301,6 +1330,9 @@ sub debug {
 		    #  enter more code or data
 		    #  uses $term->readline() to force keyboard input
 		    ########################################################################
+		    $argv = "keyboard input";
+		    $opt_l = 1;			# interactive input is best with listing
+		    print "Enter LOC and code or data interactively (q to return to debugger)\n\n\t";
 		    assembleFile(0);		# interactive pass 0
 		    print("\n");
 		    next;
@@ -1362,6 +1394,7 @@ sub debug {
 			next;
 		    }
 		    $pc = (defined $2) ? ($mem[$num] & 0777) : $num;	# @address : address
+		    $opt_B = "";			# can no longer accept Batch data
 		    run();
 		    next;
 		}
@@ -1438,10 +1471,10 @@ sub debug {
 		    )
 		)?
 	    )?  \s*
-	    (				# $23 optional empty command - list
-		( [*#=<\/] )		# $24 command selection
-		( [cduoxbDUOXBsS] )?	# $25 optional list mode selection
-		( .* )			# $26 optional assembly input
+	    (					# $23 optional empty command - list
+		( [*#=<\/] )			# $24 command selection
+		( [cduoxbDUOXBsS] )?		# $25 optional list mode selection
+		( .* )				# $26 optional assembly input
 	    )?
 	$/x) {
 	    ########################################################################
@@ -1577,10 +1610,10 @@ sub debug {
 		} elsif ($listCmd eq '=') {
 		    next if $breaks[$l] != 1;	# list break or watch points
 		}
-		$brkStar = $breaks[$l] ? "  *" : "";
+		$brkStar = $breaks[$l] ? " *" : "";
 		$label = defined($sym = $symbols{$l}) ? "$sym:" : "";
 		$tmp = $mem[$l];
-		printf "\t%03o%s\t%05o\t%s\t", $l, $brkStar, $tmp, $label;
+		printf "  %03o%s\t%05o\t%s\t", $l, $brkStar, $tmp, $label;
 		$tmp += ($mem[$l+1] << 15) if $listOfs == 2;
 		########################################################################
 		#  select list mode
@@ -1593,8 +1626,24 @@ sub debug {
 			$opc   = $opNames[($tmp & 076000) >> 10];
 			$ind   = $tmp & 01000 ? '@' : "";
 			$m  = $tmp & 0777;
-			unless (defined($mref = $symbols{$m})) {
+		      mrefFound:
+			until (defined($mref = $symbols{$m})) {
+			    for ($i = 1; $i < 8; $i++) {
+				if ($l == $m+$i) {
+				    $mref = ".-$i";
+				    last mrefFound;
+				}
+				if (defined($mref = $symbols{$m-$i})) {
+				    $mref .= "+$i";
+				    last mrefFound;
+				}
+				if ($l == $m-$i) {
+				    $mref = ".+$i";
+				    last mrefFound;
+				}
+			    }
 			    $mref = sprintf "%o", $m;
+			    last mrefFound;
 			}
 			printf "%s %s%s\n", $opc, $ind, $mref;
 		    }
@@ -1652,7 +1701,7 @@ sub debug {
 		#  end of list modes - default is simple list like /
 		#  list hi order byte of a double precision number
 		########################################################################
-		printf("\t%03o\t%05o\n", $l+1, $mem[$l+1]) if $listOfs == 2;
+		printf("  %03o\t%05o\n", $l+1, $mem[$l+1]) if $listOfs == 2;
 		if ($listCmd eq '<' and $stFlag) {
 		    ########################################################################
 		    #  Assemble one code statement, one single or double precision number
@@ -1735,14 +1784,14 @@ sub debug {
 
 sub run {
     my ($t0, $t1, $sec, $usec);
-    my ($instr, $op, $at, $num, $next, $jmsFlag, $n, $watch, $mv, $label, $jmsLabel, $sym);
+    my ($instr, $op, $at, $num, $next, $jmsFlag, $n, $watch, $mv, $label, $jmsMr, $sym);
     if ($eF) {
 	warn "*** ERROR: cannot run because of previous $eF assembly errors\n";
 	exit;
     }
     $mem[0] = $mem[0777] = $jR = $jC = $jmsCall = $break = $next = $abort = 0;	# clear ACC, C and jump testers
     @jmsStack = ();
-    $jmsLabel = "";
+    $jmsMr = 0;
     $running = 1;
     printf ("\t%3o *****  run *****\n", $pc) if $opt_t;
     my $iCnt = 0;
@@ -1777,9 +1826,11 @@ sub run {
 	$opttx = $optlx || ($optnx && ($break || $watch ||	# trace at break or watch point
 		 $breaks[$pc+1] && $ocTrace[($mem[$pc+1] & 076000) >> 10]));	# or break before conditional jmp
 	if ($opt_t or $opttx) {
-	    if ($jmsLabel) {
-		printf("\n%s\t%03o %5o\n", $jmsLabel, $pc-1, $mem[$pc-1]);
-		$jmsLabel = "";
+	    if ($jmsMr) {
+		if ($jmsMr == $pc-1) {			# trace the start of a subroutine if stepping into it
+		    printf("\n%s\t%03o %5o\n", defined($sym = $symbols{$jmsMr}) ? "$sym:" : "", $pc-1, $mem[$pc-1]);
+		}					# ignore if stepping over subroutine
+		$jmsMr = 0;
 	    }
 	    $label = defined($sym = $symbols{$pc}) ? "$sym:" : "";
 	    $sym = defined($sym = $symbols{$tmp}) ? $sym : sprintf "%03o", $tmp;
@@ -1788,7 +1839,7 @@ sub run {
 		print "\n";				# JMP @ - usually a subroutine return
 	    }
 	    if ($op == 01) {
-		$jmsLabel = defined($sym = $symbols{$mr}) ? "$sym:" : "";	# follow @ indirect addresses
+		$jmsMr = $mr;				# JMS start for extra trace if stepping into subroutine
 	    }
 	}
 	$mv = $mem[$mr];				# value at $mr before execution for watch point check
@@ -2033,12 +2084,30 @@ sub KDN {		# 060000
 		   ? convString($tmp, 0)
 		   : "Enter a short number";
   RepeatKDN:
-    $_ = $term->readline("$prompt: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
-    $jR = +$_;
-    $jR = oct $jR if $jR =~ m/^0/;
-    if ($jR > 077777 or $jR < ~037777) {
-	warn "*** ERROR: short number must be <= 32,767 or >= -16384\n";
+    if ($opt_B) {
+	$_ = <IN>;
+	if (defined $_) {
+	    print "$prompt: $_";
+	    chomp $_;
+	}
+    } else {
+	$_ = $term->readline("$prompt: ");
+    }
+    if (not defined $_ or $_ eq "q") {
+	print "\n" if not defined $_;
+	$abort = 2;				# ctrl-D or q
+	return;
+    }
+    s/(^\s+|,|\s+$)//g;
+    my $o = 0;
+    $jR = m/^0/ ? ($o = 1, oct $_) : +$_;
+    if ($jR =~ m/[^0-9+-]/) {
+	warn "*** ERROR: '$jR' is not a numeric integer\n";
+	$prompt = "Try again";
+	goto RepeatKDN;
+    }
+    if ($jR > ($o ? 077777 : 037777) or $jR < ~037777) {
+	warn "*** ERROR: short number '$jR' must be between -16,384 and +16,383\n";
 	$prompt = "Try again";
 	goto RepeatKDN;
     }
@@ -2052,16 +2121,34 @@ sub KDD {		# 062000
 		   ? convString($tmp, 0)
 		   : "Enter a long number";
   RepeatKDD:
-    $_ = $term->readline("$prompt: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
-    $jR = +$_;
-    $jR = oct $jR if $jR =~ m/^0/;
-    if ($jR > 07777777777 or $jR < ~03777777777) {
-	warn "*** ERROR: long number must be <= 1,073,741,823 or >= -536,870,912\n";
+    if ($opt_B) {
+	$_ = <IN>;
+	if (defined $_) {
+	    print "$prompt: $_";
+	    chomp $_;
+	}
+    } else {
+	$_ = $term->readline("$prompt: ");
+    }
+    if (not defined $_ or $_ eq "q") {
+	print "\n" if not defined $_;
+	$abort = 2;				# ctrl-D or q
+	return;
+    }
+    s/(^\s+|,|\s+$)//g;
+    my $o = 0;
+    $jR = m/^0/ ? ($o = 1, oct $_) : +$_;
+    if ($jR =~ m/[^0-9+-]/) {
+	warn "*** ERROR: '$jR' is not a numeric integer\n";
 	$prompt = "Try again";
 	goto RepeatKDD;
     }
-    $mem[$mr] = $jR & 077777;		# long number
+    if ($jR > ($o ? 07777777777 : 03777777777) or $jR < ~03777777777) {
+	warn "*** ERROR: long number '$jR' must be between -536,870,912 and +536,870,911\n";
+	$prompt = "Try again";
+	goto RepeatKDD;
+    }
+    $mem[$mr] = $jR & 077777;			# long number
     $mem[$mr+1] = ($jR >> 15) & 077777;
     print "\t\t\t\t\t\t\t " if $opttx;
 } # KDD
@@ -2069,10 +2156,15 @@ sub KDD {		# 062000
 sub KCH {		# 064000
     print "\n" if $opttx;
     ReadMode('cbreak');
-    my $byte = ReadKey(0);			# single character from keyboard (stdin)
-    if (not defined $byte or ord($byte) == 04) { ReadMode('normal'); print "\n"; $abort = 1; return; }	# ctrl-D
-    $jR = $mem[$mr] = ord $byte;		# do not echo single character input
+    my $byte = $opt_B ? getc(IN) : ReadKey(0);	# single character from Batch file or keyboard
+    if (not defined $byte or ord($byte) == 04) {
+	ReadMode('normal');			# # ctrl-D
+	print "\n";
+	$abort = 2;
+	return;
+    }
     ReadMode('normal');
+    $jR = $mem[$mr] = ord $byte;		# do not echo single character input
     print "\t\t\t\t\t\t\t " if $opttx;
 } # KCH
 
@@ -2084,23 +2176,35 @@ sub KCS {		# 066000
 		   ? convString($tmp, 0)
 		   : "Enter a text string";
   RepeatKCS:
-    $_ = $term->readline("$prompt: ");
-    if (not defined $_) { print "\n"; $abort = 1; return; }	# ctrl-D
+    if ($opt_B) {
+	$_ = <IN>;
+	if (defined $_) {
+	    print "$prompt: $_";
+	    chomp $_;
+	}
+    } else {
+	$_ = $term->readline("$prompt: ");
+    }
+    if (not defined $_ or $_ eq "q") {
+	print "\n" if not defined $_;
+	$abort = 2;				# ctrl-D or q
+	return;
+    }
     $char0 = '';
     $byte0 = $bs0 = $bs = $jR = 0;
     foreach $char (split //, $_) {
 	$byte = ord($char);
 	if ($bs) {
 	    if ($byte == 0156) {
-		$byte = 012;				# "\n"  LF
+		$byte = 012;			# "\n"  LF
 	    } elsif ($byte == 0164) {
-		$byte = 011;				# "\t"  HT
+		$byte = 011;			# "\t"  HT
 	    }
 	} elsif ($byte == 0134) {
-	    $bs   = 0134;				# '\'
+	    $bs   = 0134;			# '\'
 	    next;
 	} elsif ($byte == 011) {
-	    $char = "\\t";				# real HT display as "\t"
+	    $char = "\\t";			# real HT display as "\t"
 	}
 	if ($byte0) {
 	    if ($mr >= 0776) { goto KCSERR0; }
@@ -2115,7 +2219,7 @@ sub KCS {		# 066000
 	    $char0 = $char;
 	    $bs0   = $bs;
 	}
-	$bs = 0;					# all other chars following '\' unchanged
+	$bs = 0;				# all other chars following '\' unchanged
     }
     if ($mr >= 0776) { goto KCSERR0; }
     $num = ($byte0 & 0177);
@@ -2132,20 +2236,20 @@ sub KCS {		# 066000
 
 
 sub PDN {		# 070000
-    $jR = $mem[$mr];			# single precision unsigned number
-    if ($jR & 040000 & $mem[0776]) {
-	$jR |= -040000;		# extend sign for short signed number
+    $jR = $mem[$mr];				# single precision unsigned number
+    if ($jR & 040000) {
+	$jR |= -040000;				# extend sign for short signed number
     }
-    printf "%d\n", $jR;		# print single precision number
+    printf "%d\n", $jR;				# print single precision number
 } # PDN
 
 sub PDD {		# 072000
     $jR = $mem[$mr++];
-    $jR += $mem[$mr] << 15;		# double precision unsigned number
-    if ($jR & 04000000000 & ($mem[0776] << 15)) {
-	$jR |= -04000000000;		# extend sign for long signed number
+    $jR += $mem[$mr] << 15;			# double precision unsigned number
+    if ($jR & 04000000000) {
+	$jR |= -04000000000;			# extend sign for long signed number
     }
-    printf "%ld\n", $jR;		# print double precision number
+    printf "%ld\n", $jR;			# print double precision number
 } # PDD
 
 sub PCH {		# 074000
@@ -2155,19 +2259,19 @@ sub PCH {		# 074000
 
 sub PRF {		# 076000
     my ($num, $sign, $format, $i);
-    my @nums = ();			# print string with optional numeric printf %d formats
-    $jR = $mem[$mr];			# 0 if argument is NULL string ""
-    $format = convString($mr, 0);	# raw string
+    my @nums = ();				# print string with optional numeric printf %d formats
+    $jR = $mem[$mr];				# 0 if argument is NULL string ""
+    $format = convString($mr, 0);		# raw string
     $i = 1;
     @nums = ();
     while ($format =~ m/
-	    (				# $1
+	    (					# $1
 		%
-		([# +-]?)		# $2
-		(\d+)?			# $3
-		(\.\d+)?		# $4
-		(l?)			# $5
-		([csdDuUboOxX])		# $6
+		([# +-]?)			# $2
+		(\d+)?				# $3
+		(\.\d+)?			# $4
+		(l?)				# $5
+		([csdDuUboOxX])			# $6
 	    )
 	/gx) {
 	$tmp = $mem[$pc++];			# fetch address of next number parameter
@@ -2180,25 +2284,25 @@ sub PRF {		# 076000
 	    }
 	}
 	if ($6 eq 'c') {
-	    $num = $mem[$mr] & 0177;	# %c	single character
+	    $num = $mem[$mr] & 0177;		# %c	single character
 	} elsif ($6 eq 's') {
-	    $num = convString($mr, 0);	# %s	raw string
+	    $num = convString($mr, 0);		# %s	raw string
 	} else {
-	    $num = $mem[$mr];		# %d %D %u %U %b %o %O %x %X or %ld etc
+	    $num = $mem[$mr];			# %d %D %u %U %b %o %O %x %X or %ld etc
 	    if ($5 or $6 eq 'D' or $6 eq 'U' or $6 eq 'O') {
 		$num += $mem[$mr+1] << 15;	# %D %U %O or "ld" etc
 		$sign = -04000000000;		# double precision number
 	    } else {
-		$sign = -040000;	# %d etc  single precision number
+		$sign = -040000;		# %d etc  single precision number
 	    }
 	    if (($6 eq 'd' or $6 eq 'D') and ($num & $sign)) {
-		$num |= $sign;		# sign extend signed negative number
+		$num |= $sign;			# sign extend signed negative number
 	    }
 	}
-	push @nums, $num;		# collect parameters for each %d etc format element
+	push @nums, $num;			# collect parameters for each %d etc format element
 	printf("\t%03o   %03o\t\t%2d %s\t'%s'\n", $pc-1, $mr, $i, $1, $6 eq 'c' ? chr $num : $num) if $opttx;
 	$i++;
     }
-    printf $format, @nums;		# use perl printf for output of collected elements
+    printf $format, @nums;			# use perl printf for output of collected elements
     print "\n" if ($opt_t or $opttx) and $format !~ m/\n$/;	# trace '\n' unless LF at end of string
 } # PRF
