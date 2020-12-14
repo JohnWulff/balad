@@ -324,7 +324,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.5 $
+$Id: balad 1.6 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -1220,6 +1220,40 @@ sub assembleLine {
 
 ########################################################################
 #
+#  mref - determine symbolic name from a memory reference
+#    arg1: address of location
+#    arg2: contents of the location
+#
+########################################################################
+
+sub mref {
+    my ($l, $m) = @_;
+    my ($mref, $i);
+    $m  &= 0777;
+  mrefFound:
+    until (defined($mref = $symbols{$m})) {
+	for ($i = 1; $i < 8; $i++) {
+	    if ($l == $m+$i) {
+		$mref = ".-$i";
+		last mrefFound;
+	    }
+	    if (defined($mref = $symbols{$m-$i})) {
+		$mref .= "+$i";
+		last mrefFound;
+	    }
+	    if ($l == $m-$i) {
+		$mref = ".+$i";
+		last mrefFound;
+	    }
+	}
+	$mref = sprintf "%o", $m;
+	last mrefFound;
+    }
+    return $mref;
+} # mref
+
+########################################################################
+#
 #  Debugger
 #    arg1: 0 called before running a program
 #	   1 called from a break
@@ -1619,33 +1653,13 @@ sub debug {
 		#  select list mode
 		########################################################################
 		if ($listMode eq 'c') {		# list as balad code
-		    my ($opc, $ind, $m, $mref);
+		    my ($opc, $ind);
 		    if ($tmp == 0) {		# 0 instead of JMP ACC or HLT
 			print "0\n";
 		    } else {
 			$opc   = $opNames[($tmp & 076000) >> 10];
 			$ind   = $tmp & 01000 ? '@' : "";
-			$m  = $tmp & 0777;
-		      mrefFound:
-			until (defined($mref = $symbols{$m})) {
-			    for ($i = 1; $i < 8; $i++) {
-				if ($l == $m+$i) {
-				    $mref = ".-$i";
-				    last mrefFound;
-				}
-				if (defined($mref = $symbols{$m-$i})) {
-				    $mref .= "+$i";
-				    last mrefFound;
-				}
-				if ($l == $m-$i) {
-				    $mref = ".+$i";
-				    last mrefFound;
-				}
-			    }
-			    $mref = sprintf "%o", $m;
-			    last mrefFound;
-			}
-			printf "%s %s%s\n", $opc, $ind, $mref;
+			printf "%s %s%s\n", $opc, $ind, mref($l, $tmp);
 		    }
 		} elsif ($listMode eq 'd') {
 		    $tmp |= -040000 if $tmp & -040000;	# extend sign
@@ -1833,8 +1847,7 @@ sub run {
 		$jmsMr = 0;
 	    }
 	    $label = defined($sym = $symbols{$pc}) ? "$sym:" : "";
-	    $sym = defined($sym = $symbols{$tmp}) ? $sym : sprintf "%03o", $tmp;
-	    printf("%s\t%3o %05o  %3s %s%s", $label, $pc, $instr, $opNames[$op], $at ? "@" : "", $sym);
+	    printf("%s\t%3o %05o  %3s %s%s", $label, $pc, $instr, $opNames[$op], $at ? "@" : "", mref($pc, $tmp));
 	    if ($op <= 7 and $op != 1 and $at) {	# JMP JZR JNR etc except JMS
 		print "\n";				# JMP @ - usually a subroutine return
 	    }
