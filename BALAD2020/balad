@@ -300,7 +300,7 @@ my @debPrompts	= ( ">>", "B>", "W>" );			# debug() entry prompts
 my $named = $0;
 $named =~ s#.*[/\\]##;		# delete directory names in path
 my @argv1 = ();
-my ($argv, $loc, $state, $pc, $mr, $tmp, $jR, $jC, $listMode, $lM, $listOfs, $lO, $abort, $cmr, $list, $listArgv);
+my ($argv, $loc, $state, $pc, $mr, $tmp, $jR, $jC, $listMode, $lM, $listOfs, $lO, $abort, $cmr, $listArgv);
 my @errorMsgs = ();
 
 format STDERR =
@@ -324,7 +324,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.6 $
+$Id: balad 1.7 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -453,6 +453,7 @@ if ($opt_m) {
 }
 
 my $eF = 0;
+my $list = 0;
 my $term = Term::ReadLine->new('balad');
 $SIG{QUIT} = \&interrupt;	# signal 3	(ctrl-\ interrupt from keyboard)
 $SIG{PIPE} = \&interrupt;	# signal 13
@@ -493,7 +494,7 @@ for (my $i = 0; $i <= $#argv1; $i++) {
     open IN, $argv or
 	die "can't open input file $argv";	# unlikely - will have died in pass 1
     if ($filesAssd >= 2) {
-	print STDERR "$argv\n";
+	print "$argv\n";
 	if ($list > 2) {
 	    print LIST "$argv\n";
 	} else {
@@ -1848,11 +1849,12 @@ sub run {
 	    }
 	    $label = defined($sym = $symbols{$pc}) ? "$sym:" : "";
 	    printf("%s\t%3o %05o  %3s %s%s", $label, $pc, $instr, $opNames[$op], $at ? "@" : "", mref($pc, $tmp));
-	    if ($op <= 7 and $op != 1 and $at) {	# JMP JZR JNR etc except JMS
-		print "\n";				# JMP @ - usually a subroutine return
-	    }
-	    if ($op == 01) {
-		$jmsMr = $mr;				# JMS start for extra trace if stepping into subroutine
+	    if ($op <= 7) {				# JMP JMS JZR JNR etc
+		if ($op == 01) {
+		    $jmsMr = $mr;			# JMS start for extra trace if stepping into subroutine
+		} elsif ($at) {				# except JMS
+		    print "\n";				# JMP @ - usually a subroutine return
+		}
 	    }
 	}
 	$mv = $mem[$mr];				# value at $mr before execution for watch point check

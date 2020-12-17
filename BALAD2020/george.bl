@@ -27,7 +27,7 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: george.bl 1.2 $
+#  $Id: george.bl 1.3 $
 #
 ########################################################################
 
@@ -180,7 +180,7 @@ num1:	INC digits	; number is growing
 	LDA dest+1
 	STA mulcnd	; multiplicand
 	CLR mulcnd+1
-	LDA ACC+1		; hi part of lo order multiplication
+	LDA ACC+1	; hi part of lo order multiplication
 	JMS mult
 	STA dest+1	; store hi part of number - TODO check for overflow
 	JMP gettok	; get next digit or next operator
@@ -483,7 +483,7 @@ showEn:	PCH nl		; "\n"
 ########################################################################
 
 mult:	0		; ACC added to lo part of result
-	CLR ACC+1		; hi part of result initially zero
+	CLR ACC+1	; hi part of result initially zero
 mulLp:	TST mulplr	; is multiplyer all 0's ?
 	JZR @mult	; yes - return DP result in ACC,ACC+1
 	CLR C		; no
@@ -492,7 +492,7 @@ mulLp:	TST mulplr	; is multiplyer all 0's ?
 	CLR C		;  1  DP add to result
 	ADD mulcnd	; add shifted lo multiplicand to lo result
 	STA savACC	; save ACC
-	LDA ACC+1		; hi result
+	LDA ACC+1	; hi result
 	ADD mulcnd+1	; add shifted hi multiplicand to hi result
 	STA ACC+1
 	LDA savACC	; restore ACC
@@ -666,7 +666,7 @@ mul:	0
 	STA mulplr
 	LDA savACC	; restore ACC
 	STA dest	; reult in destLO is now fixed
-	LDA ACC+1		; add result hi to next multiplication
+	LDA ACC+1	; add result hi to next multiplication
 	JMS mult
 	STA dest+1	; result complete unless overflow
 
