@@ -324,7 +324,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.7 $
+$Id: balad 1.8 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -363,7 +363,8 @@ format STDOUT =
     O <file>  output the source text to <file>
     L         output the listing text to STDOUT
     L <file>  output the listing text to <file>
-    S         output the Symbol Table
+    S         output the Symbol Table         (sorted by symbols)
+    Si        output the inverse Symbol Table (sorted by address)
     H         output the application Help text if any
     h         output the BALAD debugger help text
     q         QUIT balad
@@ -569,23 +570,47 @@ sub convString {
 
 ########################################################################
 #
+#  Output not defined symbols in Symbol Table
+#	print chain of locations requiring the undefined symbol
+#
+########################################################################
+
+sub notDefined {
+    my ($key, $val) = @_;
+    printf "%-11s at", $key;			# undefined symbol
+    do {
+	printf " %03o", $val;			# location requiring the symbol
+	$val = $mem[$val] & 0777;
+    } while ($val);
+    printf " *** not defined\n";
+} # notDefined
+
+########################################################################
+#
 #  Output Symbol Table
 #
 ########################################################################
 
 sub outSymTab {
+	my ($inv) =@_;
 	my ($key, $val, $v);
-	foreach $key (sort keys %symTable) {
-	    $val = ($v = $symTable{$key}) & 0777;
-	    if ($v & 01000) {
-		printf "%-11s at", $key;			# undefined symbol
-		do {
-		    printf " %03o", $val;			# locations
-		    $val = $mem[$val] & 0777;
-		} while ($val);
-		printf " *** not defined\n";
-	    } else {
-		printf "%-11s %03o\n", $key, $val & 0777;	# defined symbol
+	if (not $inv) {
+	    foreach $key (sort keys %symTable) {
+		$val = ($v = $symTable{$key}) & 0777;
+		if ($v & 01000) {
+		    notDefined($key, $val);			# not defined symbol
+		} else {
+		    printf "%-11s %03o\n", $key, $val;		# defined symbol
+		}
+	    }
+	} else {
+	    foreach $key (sort { $symTable{$a} <=> $symTable{$b} } keys %symTable) {
+		$val = ($v = $symTable{$key}) & 0777;
+		if ($v & 01000) {
+		    notDefined($key, $val);			# not defined symbol
+		} else {
+		    printf "%03o %s\n", $val, $key;		# defined symbol
+		}
 	    }
 	}
 } # outSymTab
@@ -1343,8 +1368,8 @@ sub debug {
 	    outText(1, $tmp);			# output listing
 	    next;
 	}
-	if (m/^\s*S(ym)?$/) {
-	    outSymTab();			# output Symbol Table
+	if (m/^\s*S([iI]?)$/) {
+	    outSymTab($1);			# output Symbol Table
 	    next;
 	}
 	if (m/^\s*H(elp)?$/) {
