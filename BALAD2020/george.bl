@@ -10,7 +10,7 @@
 #
 #  Reverse Polish Notation Calculator 'GEORGE'
 #
-#	see help text at the end of the file for a full description 
+#	see help text at the end of the file for a full description
 #
 #  Historical Note: I wrote my first computer program in 1957 for a
 #  Reverse Polish Notation Calculater called 'GEORGE', which ran as an
@@ -27,36 +27,28 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: george.bl 1.4 $
+#  $Id: george.bl 1.5 $
 #
 ########################################################################
 
-######  Variables and constants  #######################################
+######  Variables and Constants  #######################################
 
 	LOC 2
 
-dest:	0l		; double precision result
-swpPfr:
-src:	0l		; double precision src
-swpPto:
-quotit:			; double precision quotient for div
-mulcnd:	0l		; double precision multiplicand for simple mult
-swpP:
-opOfs:
+dest:	0L		; double precision result
+src:	0L		; double precision src
+mulcnd:	0L		; double precision multiplicand for simple mult
 mulplr:	0		; single precision multiplier   for simple mult
-savACC:	0		; used in main swpNow and mult
-sign:	0		; used locally in add sub (mul div via setSgn tstSgn)
 expPTR:	0		; byte pointer into epression string (global)
 stackP:	0		; stack pointer                      (global)
 digits:	0		; count digits in a number           (global)
-showFl:	0		;                                    (global)
 hexFl:	0		;                                    (global)
 inBase:	0		;                                    (global)
 asBase:	0		;                                    (global)
 expADR:	ADR expr	; word address of expression string
 stackA:	ADR stack	; top of stack (growing downwards)
-funPAd:	ADR @addADR	; indirect address of function pointer list
-addADR:	ADR add		; function pointer list array
+funPAd:	ADR @funAdr	; indirect address of function pointer list
+funAdr:	ADR add		; function pointer list array
 	ADR sub
 	ADR mul
 	ADR div
@@ -92,6 +84,7 @@ C177:	0177		; character mask
 C40000:	040000		; sign bit
 prompt:	"RPN"
 fmtDP:	" %#ld"		; should be near the front so no backward reference
+inpEms:	"? %c\n"
 errMsg:	"? err\n";	; errMsg+3 is 00000 HLT
 
 ######  Start of main program  #########################################
@@ -225,7 +218,7 @@ notNum:	CMP ASC_q	; "q"
 
 	JMS push	; Enter or duplicate number on stack
 	JMS iniDig	; clear digits, hexFl -1, decimal base, C
-	CLR showFl	; show stack after pushing a new number
+	CLR sign	; show stack after pushing a new number
 	JMP gettok
 
 ########################################################################
@@ -237,9 +230,11 @@ tstNum:	TST digits	; has a number been built ?
 
 	JMS push	; yes - push the new number
 	JMS iniDig	; clear digits, hexFl -1, decimal base, C
-	CLR showFl	; show stack after pushing a new number
+	CLR sign	; show stack after pushing a new number
 
-noNum:	LDA savACC	; restore accumulator
+noNum:	LDA funPAd	; address of function pointer array funAdr
+	STA mulplr	; funAdr[0] add
+	LDA savACC	; restore accumulator
 	JZR expEnd	; end of expression - show result
 			; unless just shown with 'd' 'o' 'x' or 'b'
 	CMP space
@@ -251,23 +246,25 @@ noNum:	LDA savACC	; restore accumulator
 #  Analyze further RPN tokens
 ########################################################################
 
-	CLR showFl	; all other tokens force showing the stack again
-	CLR opOfs	; 0 add (share with mulplr)
+	CLR sign	; all other tokens force showing the stack again
+			; funAdr[0] add (in mulplr shared)
 	CMP addOp	; "+"
 	JZR execOp
-	INC opOfs	; 1 sub
+	INC mulplr	; funAdr[1] sub
 	CMP subOp	; "-"
 	JZR execOp
-	INC opOfs	; 2 mul
+	INC mulplr	; funAdr[2] mul
 	CMP mulOp	; "*"
 	JZR execOp
-	INC opOfs	; 3 div
+	INC mulplr	; funAdr[3] div
 	CMP divOp	; "/"
 	JNE test_n
 
 ########################################################################
 #  Lambda operation using a computed subroutine call from src and dest.
 #	dest = dest op src	# for op = + - * and /
+#  and the arithmetic function 'negate'
+#	dest = - dest
 ########################################################################
 
 execOp:	JMS pop		; popped value to src and src+1
@@ -276,14 +273,8 @@ execOp:	JMS pop		; popped value to src and src+1
 	LDA dest+1
 	STA src+1
 	JMS pop		; popped value is in dest and dest+1
-	LDA funPAd	; address of function pointer list
-	ADD opOfs	; select offset for add sub mul or div
-	JMS @ACC	; execute the selected operation add sub mul div
+	JMS @mulplr	; execute the selected operation add sub mul div
 	JMP pushDs	; push result from dest and dest+1
-
-########################################################################
-#  miscellaneous operators
-########################################################################
 
 test_n:	CMP ASC_n	; "n"
 	JNE test_D
@@ -291,6 +282,10 @@ test_n:	CMP ASC_n	; "n"
 	JMS negate	; DP negate destination
 pushDs:	JMS push	; push result from dest and dest+1
 	JMP gettok	; next token
+
+########################################################################
+#  miscellaneous operators
+########################################################################
 
 test_D:	CMP ASC_D	; "D"
 	JNE test_S
@@ -309,12 +304,12 @@ test_R:	CMP ASC_R	; "R"
 
 ########################################################################
 #  Swap or Roll numbers on the stack
-#	swpP = StackP + 4 for Swap last two numbers on the stack
-#	swpP = stackA     for Roll last number to the top of the stack
+#	mulplr = StackP + 4 for Swap last two numbers on the stack
+#	mulplr = stackA     for Roll last number to the top of the stack
 #	Error if only one value on the stack - stack unchanged
 ########################################################################
 
-swpNow:	STA swpP	; share with mulplr and opOfs
+swpNow:	STA mulplr	; shared
 	LDA stackP
 	STA savACC	; save stack pointer
 	JMS pop		; last number on the stack (also checks empty stack)
@@ -324,17 +319,17 @@ swpNow:	STA swpP	; share with mulplr and opOfs
 	PRF errMsg	; "? err\n"
 	JMP swp2	; restore stack
 
-swp1:	STA swpPfr	; share with src
+swp1:	STA src		; shared
 	SUB D2
-	STA swpPto	; share with mulcnd
-	LDA swpP
+	STA mulcnd	; shared
+	LDA mulplr
 	STA stackP
 
-swpLp:	LDA @swpPfr	; move numbers down on the stack
-	INC swpPfr
-	STA @swpPto
-	INC swpPto
-	LDA swpPfr
+swpLp:	LDA @src	; move numbers down on the stack
+	INC src
+	STA @mulcnd
+	INC mulcnd
+	LDA src
 	CMP stackP	; until top for swap or roll is reached
 	JLT swpLp
 
@@ -357,39 +352,62 @@ test_d:	CMP ASC_d	; "d"	decimal
 	JEQ show
 
 	CMP ASC_b	; "b"	binary
-	JEQ show
+	JNE inpErr
+
+########################################################################
+#  d o x b Show intermediate results remaining in the stack in different
+#  number bases.
+#  Follow this with the remainder of the RPN expression
+########################################################################
+
+show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
+
+	PCH tab		; "\t" show remainder of RPN expression
+	PCH tab		; "\t" separated by a wide space:w
+	LDA expPTR
+	STA mulplr	; shared
+	ROR mulplr
+	LDA @mulplr	; two bytes from the expression
+	JZC show1	; skip SWP ACC ... CLR C for even bytes
+
+	SWP ACC		; swap bytes for odd bytes
+	AND C177
+	JZR show2	; terminates on 2nd byte
+	INC mulplr
+	PCH ACC		; print first odd byte of rest of expression
+	CLR C
+
+show1:	PRF @mulplr	; print rest of expression
+show2:	INC sign	; no need to show stack again if terminated now
+	PCH nl		; "\n"
+	JMP gettok
 
 ########################################################################
 #  Input error - RPN token not recognized
 ########################################################################
 
-	PRF inpEms	; "? %c\n"
+inpErr:	PRF inpEms	; "? %c\n"
 	ADR ACC		; token is character in the accumulator
-	JMP gettok
-
-########################################################################
-#  d o x b Show intermediate results remaining in the stack
-########################################################################
-
-show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
-	INC showFl	; no need to show stack again if terminated now
 	JMP gettok
 
 ########################################################################
 #  End of RPN expression - show current values on the stack in decimal
 ########################################################################
 
-expEnd:	TST showFl	; was output shown already
+expEnd:	TST sign	; was output shown already
 	JNR loop	; yes - don't show again
+
 	LDA ASC_d	; no  - restore decimal output
 	JMS showSt	; " %#ld"
+	PCH nl		; "\n"
 	JMP loop	; get new RPN expression
 
 ######  End of main program  ###########################################
 
-######  Strings  #######################################################
+######  More variables  ################################################
 
-inpEms:	"? %c\n"
+savACC:	0		; used in main swpNow and mult
+sign:	0		; used locally in add sub (mul div via sSgnMD tSgnMD)
 
 ######  Subroutines  ###################################################
 
@@ -457,13 +475,11 @@ showSt:	0
 	LDA stackA	; stack address to temporary stack pointer in ACC
 	CLR C
 showNx:	CMP stackP
-	JLE showEn	; current end of stack
+	JLE @showSt	; current end of stack
 	SUB D2		; decrement by 2
 	PRF fmtDP	; " %#ld" " %#lo" " %#lx" " %#lb"
 	ADR @ACC	; indirect pointer to value on the stack
 	JMP showNx
-showEn:	PCH nl		; "\n"
-	JMP @showSt
 
 ########################################################################
 #
@@ -515,6 +531,21 @@ negate:	0
 	JMP @negate
 
 ########################################################################
+#  Test signs of dest and src for 'add' and 'sub' routines
+########################################################################
+
+tSgnAS:	0
+	STA dest+1
+	LDA C40000	; sign bit
+	AND dest+1
+	CLR C
+	ADD C40000	; complement sign to make equal signs differ
+	CMP sign	; no overflow if signs of dest and src differ or
+	JNE @tSgnAS	; sign of result equals sign of dest
+	PRF errMsg	; "? err\n";
+	JMP tSgnAS
+
+########################################################################
 #  double precision signed add
 #	dest = dest + src
 #	return double precision number in dest and dest+1
@@ -537,15 +568,7 @@ add:	0
 	STA dest
 	LDA dest+1
 	ADD src+1
-	STA dest+1
-
-	LDA C40000	; sign bit
-	AND dest+1
-	CLR C
-	ADD C40000	; complement sign to make equal signs differ
-	CMP sign	; no overflow if signs of dest and src differ or
-	JNE @add	; sign of result equals sign of dest
-	PRF errMsg	; "? err\n";
+	JMS tSgnAS	; test for overflow
 	JMP @add
 
 ########################################################################
@@ -571,15 +594,7 @@ sub:	0
 	STA dest
 	LDA dest+1
 	SUB src+1
-	STA dest+1
-
-	LDA C40000	; sign bit
-	AND dest+1
-	CLR C
-	ADD C40000	; complement sign to make equal signs differ
-	CMP sign	; no overflow if signs of dest and src differ or
-	JNE @sub	; sign of result equals sign of dest
-	PRF errMsg	; "? err\n";
+	JMS tSgnAS	; test for overflow
 	JMP @sub
 
 ########################################################################
@@ -589,7 +604,7 @@ sub:	0
 #  If signs differ set 'sign' = 040000
 ########################################################################
 
-setSgn:	0
+sSgnMD:	0
 	LDA C40000
 	AND dest+1
 	JZR setS1
@@ -606,20 +621,20 @@ setS1:	STA sign	; sign bit of dest
 setS2:	CLR C
 	ADD sign	; sign dest ^ sign src
 	STA sign
-	JMP @setSgn
+	JMP @sSgnMD
 
 ########################################################################
-#  Test sign variable 'sign' set in 'setSgn'
+#  Test sign variable 'sign' set in 'sSgnMD'
 #  If 'sign' is 0 do nothing
 #  If 'sign' is 040000 negate dest, the result of mul or div
 ########################################################################
 
-tstSgn:	0
+tSgnMD:	0
 	STA dest+1	; complete mul or div
 	TST sign	; sign dest ^ sign src
-	JZR @tstSgn	; positive result
+	JZR @tSgnMD	; positive result
 	JMS negate	; negative result
-	JMP @tstSgn
+	JMP @tSgnMD
 
 ########################################################################
 #  double precision signed multiply
@@ -642,12 +657,12 @@ tstSgn:	0
 #	*		[ srcHI]    |
 #	=	[ ACC+1][   ACC]    |		ACC+1 must be 0
 #			    |	    |
-#	negate if	    v	    v		sign destHI ^ sign srcHI	
+#	negate if	    v	    v		sign destHI ^ sign srcHI
 #	=		[destHI][destLO]
 ########################################################################
 
 mul:	0
-	JMS setSgn	; test sign of dest and src
+	JMS sSgnMD	; test sign of dest and src
 	LDA dest	; destLO
 	STA mulcnd
 	LDA dest+1	; destHI
@@ -668,7 +683,7 @@ mul:	0
 	LDA ACC+1	; add result hi to next multiplication
 	JMS mult	; result complete unless overflow
 
-	JMS tstSgn	; negate dest if signs of dest and src differ
+	JMS tSgnMD	; negate dest if signs of dest and src differ
 	JMP @mul
 
 ########################################################################
@@ -702,9 +717,9 @@ div:	0
 	PRF errMsg	; "? err\n";
 	JMP @div	; return unchanged dest and src
 
-div1:	JMS setSgn	; test sign of dest and src
-	CLR quotit	; quotit = 0 (share with mulcnd)
-	CLR quotit+1
+div1:	JMS sSgnMD	; test sign of dest and src
+	CLR mulcnd	; mulcnd = 0 (shared)
+	CLR mulcnd+1
 
 div2:	LDA dest+1
 	CMP src+1
@@ -723,16 +738,16 @@ div3:	LDA dest	; double precision subtract dest - src
 	STA dest+1
 
 	CLR C
-	INC quotit
+	INC mulcnd
 	JZC div2
-	INC quotit+1
+	INC mulcnd+1
 	JMP div2
 
-div4:	LDA quotit	; remainder is in dest
+div4:	LDA mulcnd	; remainder is in dest
 	STA dest
-	LDA quotit+1
+	LDA mulcnd+1
 
-	JMS tstSgn	; negate dest if signs of dest and src differ
+	JMS tSgnMD	; negate dest if signs of dest and src differ
 	JMP @div
 
 ######  free for data  #################################################
@@ -777,10 +792,10 @@ __END__			; help text
 
         There was not enough BALAD memory to check overflow for *
         the multiply operator and overflow of the stack into the area
-        where the input expression is stored. 64 words are shared by
+        where the input expression is stored. 56 words are shared by
         these data structures. If they use half each, there is room for
-        16 numbers on the stack at 2 words per number and an RPN
-        expression of 63 characters at 2 characters per word.
+        14 numbers on the stack at 2 words per number and an RPN
+        expression of 56 characters at 2 characters per word.
 
         Also because of lack of memory the division algorithm is very
         simple and very slow. Division of 536,000,000 by 1 takes over
