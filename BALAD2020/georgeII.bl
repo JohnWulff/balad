@@ -1,4 +1,4 @@
-#!/usr/bin/balad
+#!/usr/bin/baladII
 ########################################################################
 #
 #	Copyright (C) 2020  John E. Wulff
@@ -27,7 +27,7 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: george.bl 1.6 $
+#  $Id: georgeII.bl 1.6 $
 #
 ########################################################################
 
@@ -53,7 +53,7 @@ funAdr:	ADR add		; function pointer list array
 	ADR sub
 	ADR mul
 	ADR div
-space:	" "		; white space
+space:	" "		; also 32; white space
 tab:	"\t"
 nl:	"\n"		; also 10
 addOp:	"+"		; + token
@@ -81,7 +81,7 @@ D2:	2
 D4:	4
 D8:	8
 D87:	87		; "a"-10 convert a -f to 10 -15
-C177:	0177		; character mask (7 bits for 15 bit word)
+C377:	0377		; character mask (8 bits for 16 bit word)
 prompt:	"RPN"
 fmtDP:	" %#ld"		; should be near the front so no backward reference
 inpEms:	"? %c\n"
@@ -114,7 +114,7 @@ gettok:	ROR expPTR	; change to word pointer and carry for odd bytes
 	SWP ACC		; swap bytes for odd bytes
 	ROL expPTR	; change to byte pointer
 	INC expPTR	; increment expression byte pointer
-	AND C177	; mask to 7 bit character from expression
+	AND C377	; mask to 8 bit character from expression
 
 ########################################################################
 #  0 - 9 a - f  analyze number input
@@ -380,7 +380,7 @@ show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
 	JZC show1	; skip SWP ACC ... CLR C for even bytes
 
 	SWP ACC		; swap bytes for odd bytes
-	AND C177
+	AND C377
 	JZR show2	; terminates on 2nd byte
 	INC lambda
 	PCH ACC		; print first odd byte of rest of expression
@@ -415,8 +415,7 @@ expEnd:	TST showFl	; was output shown already
 
 ######  More variables and constants  ##################################
 
-Csign:	040000		; sign bit (15 bit)
-C30:	30		; div counter (30 bits for 15 bit word)
+Csign:	0100000		; sign bit (16 bit)
 sign:	0		; used locally in add sub (mul div via sSgnMD tSgnMD)
 signDn:	0		; sign of destination used in div to adjust rem
 showFl:	0		; used locally to control show stack
@@ -624,7 +623,7 @@ tSgnMD:	0
 #	arg2	dest	; double precision multiplicand	- lost
 #	arg3	src	; double precision multiplier	- lost
 #	return	dest 	; double precision result
-#	savACC		; temp save ACC is free in main before JMS mult
+#	TODO ?    savACC	; temp save ACC is free in main before JMS mult
 #
 ########################################################################
 
@@ -705,7 +704,7 @@ mul:	0
 #     Besides, set the value of the iteration counter to zero.
 #  2. If z8z7z6z5z4 < d3d2d1d0, go to step 3
 #     otherwise set a flag to indicate the overflow condition and
-#     end the algorithm (cannot happen with top 30 bits 0).
+#     end the algorithm (cannot happen with top 32 bits 0).
 #  3. Shift the Z register to the left by one bit.
 #     The shift operation will vacate the LSB of the Z register.
 #     This empty memory location will be used to store the quotient bit
@@ -720,18 +719,18 @@ mul:	0
 #     If the counter is equal to four, end the algorithm
 #     otherwise go to step 3.
 #
-#  Step 2 above (overflow) cannot happen with the 60 bit dividend.
+#  Step 2 above (overflow) cannot happen with the 64 bit dividend.
 #
 #  The above algorithm describes 8/4:4+4 unsigned division and uses 9 bits
 #  for the dividend and 4 bits for the divisor, quotient and remainder.
 #
-#  To implement 30/30:30+30 signed division use sSgnMD and tSgnMD as for
+#  To implement 32/32:32+32 signed division use sSgnMD and tSgnMD as for
 #  mul and div by repeated subtraction to get the 31 bit absolute value
 #  of dividend and divisor. The sign bits are both 0.
 #
-#  Then use 60 bits for the dividend and 30 bits for the divisor,
-#  quotient and remainder. The sign bits are 0 and the top 30 bits of the
-#  extended dividend are set to 0. Do 30 shifts.
+#  Then use 64 bits for the dividend and 32 bits for the divisor,
+#  quotient and remainder. The sign bits are 0 and the top 32 bits of the
+#  extended dividend are set to 0. Do 32 shifts.
 #  
 #  Double-precision signed divide
 #       dest = dest / src
@@ -749,13 +748,13 @@ div:	0
 	JMP @div	; return unchanged dest
 
 div1:	JMS sSgnMD	; test sign of dest and src
-	CLR rem		; rem = 0; hi 30 bits if dividend
+	CLR rem		; rem = 0; hi 32 bits if dividend
 	CLR rem+1
-	LDA C30		; 30
+	LDA space	; 32
 	STA lambda
 
 div2:	CLR C
-	ROL dest	; shift 60 bit Z left
+	ROL dest	; shift 64 bit Z left
 	ROL dest+1
 	ROL rem
 	ROL rem+1
@@ -797,9 +796,9 @@ expr:	0		; RPN expression filled upwards from here
 
 ######  Space for the expression and the stack  ########################
 
-	LOC 776		; stack filled downwards from here
+	LOC 1776		; stack filled downwards from here
 stack:	ADR prompt	; top of the stack (not overwritten via stackP)
-			; 776 is also place for user defined prompt address
+			; 1776 is also place for user defined prompt address
 
 ######  End of BALAD code  #############################################
 __END__			; help text
@@ -827,8 +826,8 @@ __END__			; help text
         C       CLEAR the stack.
         q       QUIT the RPN calculator.
 
-        30 bit signed decimal arithmetic is used, which means all
-        intermediate absolute values must be less than ~536 million.
+        32 bit signed decimal arithmetic is used, which means all
+        intermediate absolute values must be less than ~2147 million.
         Arithmetic overflow errors for + and - are reported.
         Divide by zero and stack underflow errors are reported.
 
