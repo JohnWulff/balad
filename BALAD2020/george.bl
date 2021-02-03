@@ -27,7 +27,7 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: george.bl 1.6 $
+#  $Id: george.bl 1.7 $
 #
 ########################################################################
 
@@ -102,7 +102,7 @@ loop:	KCS expr	; grow expression upwards towards stack
 	LDA expADR	; expr[] address
 	STA expPTR	; word pointer first
 	JMS iniDig	; clear digits, hexFl -1, decimal base, C
-	JMP gettok+1	; skip first ROR - start with even byte of expr[0]
+	JMP .+2		; skip first ROR - start with even byte of expr[0]
 
 ########################################################################
 #  Get another byte token from the expression string

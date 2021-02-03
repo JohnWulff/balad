@@ -324,7 +324,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.8 $
+$Id: balad 1.9 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -971,7 +971,7 @@ sub assembleLine {
 	$/x and
 	defined($op = $opCodes{$1}[0]) ) {
 	$num = 0;
-	if ($2) {
+	if (defined ($i = $2)) {
 	    if (defined $6) {
 		$num = oct($6);					# octal memory reference
 	    } else {
@@ -1007,9 +1007,9 @@ sub assembleLine {
 		$errFlag++;
 		goto Err;
 	    }
-	}
+	} else { $i = 0; }
 	$val = $op | ($4 ? 01000 : 0) | $num;			# BALAD code statement
-	$line = "$label\t$1 $2$14";
+	$line = "$label\t$1 $i$14";
 	$state = $op ? 2 : 1;					# follow with code or data if JMP
     ## HLT statement #######################################################
     } elsif (m/\G\s*HLT((\s*[;#].*)?)$/) {
@@ -1290,7 +1290,7 @@ sub mref {
 ########################################################################
 
 sub debug {
-    my ($mode, $op, $mr) = @_;
+    my ($mode, $op, $m) = @_;
     my ($listCmd, $lstart, $lfin, $l, $brkStar, $label, $sym, $stFlag, $num, $assIn, $i);
     $running = 2 if $running;			# stop interrupt with ctrl-\ key in debug
     if ($mode == 0) {
@@ -1475,7 +1475,7 @@ sub debug {
 			if ($op != 01 or $mode != 1) {
 			    $break = 1;
 			} else {
-			    $jmsCall = $mr;		# defer breaks until return from this JMS
+			    $jmsCall = $m;		# defer breaks until return from this JMS
 			}
 		    } elsif ($1 eq 'u') {		# run until return from current JMS
 			$jmsCall = $jmsStack[$#jmsStack] if scalar @jmsStack;
@@ -1620,6 +1620,10 @@ sub debug {
 	    if ($lstart > $lfin) {
 		warn"??? listing range must be rising\n";
 		next;				# $loc unchanged
+	    }
+	    if ($lfin > 0777) {
+		warn"??? memory limit is octal 777\n";
+		next;
 	    }
 	    if ($listCmd eq '<') {
 		if ($25) {			# change list mode and offset temporarily for an assembly line
@@ -2298,7 +2302,7 @@ sub PCH {		# 074000
 } # PCH
 
 sub PRF {		# 076000
-    my ($num, $sign, $format, $i);
+    my ($num, $sign, $format, $i, $n);
     my @nums = ();				# print string with optional numeric printf %d formats
     $jR = $mem[$mr];				# 0 if argument is NULL string ""
     $format = convString($mr, 0);		# raw string
@@ -2315,12 +2319,16 @@ sub PRF {		# 076000
 	    )
 	/gx) {
 	$tmp = $mem[$pc++];			# fetch address of next number parameter
-	while (defined($mr = $tmp & 0777) and $tmp & 01000) {
-	    $tmp = $mem[$mr];		# @ indirect memory reference
-	    if (($tmp & 01777) == ($mr | 01000)) {
-		$num = sprintf "%o", $mr;
-		warn "*** EXEC ERROR: infinite indirect loop at LOC $num\n";
-		return;
+	########################################################################
+	#   Check for indirect memory reference
+	########################################################################
+	for ($n = 0; defined($mr = $tmp & 0777) and $tmp & 01000; ) {
+	    $tmp = $mem[$mr];			# @ indirect memory reference
+	    if ($n++ > 10) {
+		$tmp = sprintf "very long indirect loop at LOC %03o for PRF parameter %d at LOC %03o", $mr, $i, $pc-1;
+		warn "*** EXEC ERROR: $tmp\n";
+		$abort = 1;
+		last;
 	    }
 	}
 	if ($6 eq 'c') {
