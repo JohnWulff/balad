@@ -2,20 +2,19 @@
 
 ########################################################################
 #
-#	Copyright (C) 2020  John E. Wulff
+#	BALAD (Beginners Assembly Language and Debugger)
 #
 #   You may distribute under the terms of either the GNU General Public
 #   License or the Artistic License, as specified in the next line.
 #
 #	SPDX-License-Identifier: GPL-3.0+ OR Artistic-2.0
+#	Copyright (C) 2020-2021  John E. Wulff
 #
-#	BALAD assembler, interpreter and debugger
-#
-#   Balad is an assembly level programming language for an emulated
-#   virtual computer with a 15 bit word length. It is combined with a
-#   comprehensive debugging system which allows on line program assembly,
-#   execution of programs and the insertion of breakpoints to allow
-#   suspension of programs during execution.
+#   BALAD is an assembly level programming language for an emulated
+#   virtual computer with 512 words of 15 bit memory. It is combined
+#   with a comprehensive debugging system which allows on line program
+#   assembly, execution of programs and the insertion of breakpoints and
+#   watchpoints to allow suspension of programs during execution.
 #
 #   Instructions are machine oriented, using integer and logical
 #   operations only. As a concession to the beginner extra instructions
@@ -85,143 +84,63 @@ my %opCodes = (    # $instr  c                       $instr  c            $op
 
 ########################################################################
 #
-#	Three arrays accessed by op code 0 - 31 (0 - 037)
+#	Three array values accessed by op code 0 - 31 (0 - 037)
 #
-#	    $opNames[op]	op code NAME for disassembly
-#	    $opSubs[op]		op code subroutine reference
-#	    $opTrace[op]	trace C ACC and [mem] for this op code
-#	    $ocTrace[op]	trace C ACC and [mem] for instr before conditional jmp
-#
-#	These are implemented as four separate arrays for speed, since
-#	@opSubs, @opTrace and @ocTrace are accessed for each instruction execution
+#	    $opName  = $opNames[op][0]	op code NAME for disassembly
+#	    $opSub   = $opNames[op][1]	op code subroutine reference
+#	    $opTrace = $opNames[op][2]	trace C ACC and [mem] for this op code
 #
 ########################################################################
 
-my @opNames = ( # $instr $op
-	"JMP",	# 000000  0
-	"JMS",	# 002000  1
-	"JZR",	# 004000  2
-	"JNR",	# 006000  3
+my @opNames = (				# $instr $op
+	[ "JMP", \&JMP, 0, ],	# 000000  0
+	[ "JMS", \&JMS, 1, ],	# 002000  1
+	[ "JZR", \&JZR, 0, ],	# 004000  2
+	[ "JNR", \&JNR, 0, ],	# 006000  3
 
-	"JZC",	# 010000  4
-	"JNC",	# 012000  5
-	"JEZ",	# 014000  6
-	"JBN",	# 016000  7
+	[ "JZC", \&JZC, 0, ],	# 010000  4
+	[ "JNC", \&JNC, 0, ],	# 012000  5
+	[ "JEZ", \&JEZ, 0, ],	# 014000  6
+	[ "JBN", \&JBN, 0, ],	# 016000  7
 
-	"AND",	# 020000  8
-	"ADD",	# 022000  9
-	"SUB",	# 024000 10
-	"CMP",	# 026000 11
+	[ "AND", \&AND, 1, ],	# 020000  8
+	[ "ADD", \&ADD, 1, ],	# 022000  9
+	[ "SUB", \&SUB, 1, ],	# 024000 10
+	[ "CMP", \&CMP, 1, ],	# 026000 11
 
-	"LDA",	# 030000 12
-	"STA",	# 032000 13
-	"CLR",	# 034000 14
-	"TST",	# 036000 15
+	[ "LDA", \&LDA, 1, ],	# 030000 12
+	[ "STA", \&STA, 1, ],	# 032000 13
+	[ "CLR", \&CLR, 1, ],	# 034000 14
+	[ "TST", \&TST, 1, ],	# 036000 15
 
-	"COM",	# 040000 16
-	"NEG",	# 042000 17
-	"INC",	# 044000 18
-	"DEC",	# 046000 19
+	[ "COM", \&COM, 1, ],	# 040000 16
+	[ "NEG", \&NEG, 1, ],	# 042000 17
+	[ "INC", \&INC, 1, ],	# 044000 18
+	[ "DEC", \&DEC, 1, ],	# 046000 19
 
-	"ROL",	# 050000 20
-	"ROR",	# 052000 21
-	"ASR",	# 054000 22
-	"SWP",	# 056000 23
+	[ "ROL", \&ROL, 1, ],	# 050000 20
+	[ "ROR", \&ROR, 1, ],	# 052000 21
+	[ "ASR", \&ASR, 1, ],	# 054000 22
+	[ "SWP", \&SWP, 1, ],	# 056000 23
 
-	"KDN",	# 060000 24
-	"KDD",	# 062000 25
-	"KCH",	# 064000 26
-	"KCS",	# 066000 27
+	[ "KDN", \&KDN, 1, ],	# 060000 24
+	[ "KDD", \&KDD, 1, ],	# 062000 25
+	[ "KCH", \&KCH, 1, ],	# 064000 26
+	[ "KCS", \&KCS, 1, ],	# 066000 27
 
-	"PDN",	# 070000 28
-	"PDD",	# 072000 29
-	"PCH",	# 074000 30
-	"PRF",	# 076000 31
+	[ "PDN", \&PDN, 0, ],	# 070000 28
+	[ "PDD", \&PDD, 0, ],	# 072000 29
+	[ "PCH", \&PCH, 0, ],	# 074000 30
+	[ "PRF", \&PRF, 0, ],	# 076000 31
 );
 
-my @opSubs = (  # $instr $op
-	\&JMP,	# 000000  0
-	\&JMS,	# 002000  1
-	\&JZR,	# 004000  2
-	\&JNR,	# 006000  3
-
-	\&JZC,	# 010000  4
-	\&JNC,	# 012000  5
-	\&JEZ,	# 014000  6
-	\&JBN,	# 016000  7
-
-	\&AND,	# 020000  8
-	\&ADD,	# 022000  9
-	\&SUB,	# 024000 10
-	\&CMP,	# 026000 11
-
-	\&LDA,	# 030000 12
-	\&STA,	# 032000 13
-	\&CLR,	# 034000 14
-	\&TST,	# 036000 15
-
-	\&COM,	# 040000 16
-	\&NEG,	# 042000 17
-	\&INC,	# 044000 18
-	\&DEC,	# 046000 19
-
-	\&ROL,	# 050000 20
-	\&ROR,	# 052000 21
-	\&ASR,	# 054000 22
-	\&SWP,	# 056000 23
-
-	\&KDN,	# 060000 24
-	\&KDD,	# 062000 25
-	\&KCH,	# 064000 26
-	\&KCS,	# 066000 27
-
-	\&PDN,	# 070000 28
-	\&PDD,	# 072000 29
-	\&PCH,	# 074000 30
-	\&PRF,	# 076000 31
-);
-
-my @opTrace = ( # $instr $op
-	0,	# 000000  0	JMP	no trace
-	1,	# 002000  1	JMS	trace before and after execution
-	0,	# 004000  2	JZR
-	0,	# 006000  3	JNR
-
-	0,	# 010000  4	JZC
-	0,	# 012000  5	JNC
-	0,	# 014000  6	JEZ
-	0,	# 016000  7	JBN
-
-	1,	# 020000  8	AND
-	1,	# 022000  9	ADD
-	1,	# 024000 10	SUB
-	1,	# 026000 11	CMP
-
-	1,	# 030000 12	LDA
-	1,	# 032000 13	STA
-	1,	# 034000 14	CLR
-	1,	# 036000 15	TST
-
-	1,	# 040000 16	COM
-	1,	# 042000 17	NEG
-	1,	# 044000 18	INC
-	1,	# 046000 19	DEC
-
-	1,	# 050000 20	ROL
-	1,	# 052000 21	ROR
-	1,	# 054000 22	ASR
-	1,	# 056000 23	SWP
-
-	1,	# 060000 24	KDN
-	1,	# 062000 25	KDD
-	1,	# 064000 26	KCH
-	1,	# 066000 27	KCS
-
-	0,	# 070000 28	PDN
-	0,	# 072000 29	PDD
-	0,	# 074000 30	PCH
-	0,	# 076000 31	PRF
-);
+########################################################################
+#
+#	One array value accessed by a different op code 0 - 31 (0 - 037)
+#
+#	    $ocTrace[op]	trace C ACC and [mem] for instr before conditional jmp
+#
+########################################################################
 
 my @ocTrace = ( # $instr $op
 	0,	# 000000  0	JMP
@@ -324,7 +243,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.9 $
+$Id: balad 1.10 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
@@ -538,7 +457,7 @@ sub interrupt {
     } else {
 	die "$named: Caught SIG$signame: $!";
     }
-} # catch_zap
+} # interrupt
 
 ########################################################################
 #
@@ -638,7 +557,7 @@ sub appHelp {
 	    print "$argv does not have any help text\n";
 	}
     }
-}
+} # appHelp
 
 ########################################################################
 #
@@ -1683,13 +1602,13 @@ sub debug {
 		#  select list mode
 		########################################################################
 		if ($listMode eq 'c') {		# list as balad code
-		    my ($opc, $ind);
+		    my ($opName, $ind);
 		    if ($tmp == 0) {		# 0 instead of JMP ACC or HLT
 			print "0\n";
 		    } else {
-			$opc   = $opNames[($tmp & 076000) >> 10];
+			$opName   = $opNames[($tmp & 076000) >> 10][0];
 			$ind   = $tmp & 01000 ? '@' : "";
-			printf "%s %s%s\n", $opc, $ind, mref($l, $tmp);
+			printf "%s %s%s\n", $opName, $ind, mref($l, $tmp);
 		    }
 		} elsif ($listMode eq 'd') {
 		    $tmp |= -040000 if $tmp & -040000;	# extend sign
@@ -1866,7 +1785,8 @@ sub run {
 		goto stopRun;
 	    }
 	}
-	$watch = $breaks[$mr] && $opTrace[$op];
+	my ($opName, $opSub, $opTrace) = @{$opNames[$op]};
+	$watch = $breaks[$mr] && $opTrace;
 	$opttx = $optlx || ($optnx && ($break || $watch ||	# trace at break or watch point
 		 $breaks[$pc+1] && $ocTrace[($mem[$pc+1] & 076000) >> 10]));	# or break before conditional jmp
 	if ($opt_t or $opttx) {
@@ -1877,7 +1797,7 @@ sub run {
 		$jmsMr = 0;
 	    }
 	    $label = defined($sym = $symbols{$pc}) ? "$sym:" : "";
-	    printf("%s\t%3o %05o  %3s %s%s", $label, $pc, $instr, $opNames[$op], $at ? "@" : "", mref($pc, $tmp));
+	    printf("%s\t%3o %05o  %3s %s%s", $label, $pc, $instr, $opName, $at ? "@" : "", mref($pc, $tmp));
 	    if ($op <= 7) {				# JMP JMS JZR JNR etc
 		if ($op == 01) {
 		    $jmsMr = $mr;			# JMS start for extra trace if stepping into subroutine
@@ -1889,7 +1809,7 @@ sub run {
 	$mv = $mem[$mr];				# value at $mr before execution for watch point check
 	#### trace before execution ############################################
 	if ($opttx) {
-	    if ($opTrace[$op]) {			# ignore JMP and Print instructions for trace
+	    if ($opTrace) {				# ignore JMP and Print instructions for trace
 		printf ($traceFormat, "\t", $mem[0777], $mem[0], $mr, $mv);
 	    } elsif ($op == 037) {
 		printf("\t\"%s\"", convString($mr, 1));# PRF trace dressed format string
@@ -1903,15 +1823,15 @@ sub run {
 	    print "\n" if $opt_t or $opttx;
 	    debug(1, $op, $mr);
 	    goto stopRun if $abort;			# may be set in debug()
-	    print "\t\t\t\t\t\t\t " if $opttx and $opTrace[$op];
-	} elsif ($opt_t and not ($opttx and $opTrace[$op])) {
+	    print "\t\t\t\t\t\t\t " if $opttx and $opTrace;
+	} elsif ($opt_t and not ($opttx and $opTrace)) {
 	    print "\n";					# terminate trace before JMP and Print instructions
 	}
 	########################################################################
 	#   Exeute instruction
 	########################################################################
 	$pc++;						# next instruction (unless modified by JMP)
-	$opSubs[$op]->();				# execute op code (all op's exist) with resolved $mr
+	$opSub->();					# execute op code (all op's exist) with resolved $mr
 	goto stopRun if $abort;				# may be set in KDN, KDD, KCH or KCS
 	if ($next) {
 	    if ($next != $pc) {				# is jump to next instruction ?
@@ -1924,7 +1844,7 @@ sub run {
 	    $next = 0;
 	}
 	#### trace after execution #############################################
-	if ($opttx and $opTrace[$op]) {			# ignore JMP and Print instructions for trace
+	if ($opttx and $opTrace) {			# ignore JMP and Print instructions for trace
 	    printf ($traceFormat, " ==> ", $mem[0777], $mem[0], $mr, $mem[$mr]);
 	    printf ("  jC %d jR %d%s\n", $jC, $jR ? 1 : 0, $watch ? "  watch" : "");
 	}
