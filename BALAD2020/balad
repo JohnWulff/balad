@@ -28,9 +28,27 @@
 use strict;
 use integer;
 use warnings;
-use Term::ReadKey;
-use Term::ReadLine;
 $| = 1;				# output stdout buffer for every print or printf
+
+########################################################################
+#
+#	The perl module Term::ReadLine::Perl has been modified considerably
+#	and does not work correctly with the 'balad' code any more.
+#
+#	When calling $term->readline("") to use a zero length string for a prompt
+#	the module reports 5 errors the first of which is:
+#	substr outside of string at /usr/lib/perl5/site_perl/5.26.1/Term/ReadLine/readline.pm line 1977.
+#	This happened every time 'balad' is started without arguments to enter keyboard input mode.
+#	Also inputting a TAB character starts command completion, which is overkill.
+#
+#	Using Term::ReadLine::Stub fixes those errors and allows the entry of a TAB character.
+#	This is in line with older OpenSuse as well as Debian distributions on a Raspberry Pi.
+#
+########################################################################
+
+$ENV{PERL_RL} = "Stub";		# require Term::ReadLine::Stub rather than Term::ReadLine::Perl
+use Term::ReadKey;		# use happens at compile time when environment variable PERL_RL is ""
+require Term::ReadLine;		# require happens at run time when environment variable PERL_RL is "Stub"
 
 ########################################################################
 #
@@ -243,7 +261,7 @@ Usage:  @<<<<[ -lt[doxb]cmh
         -h <file>   output the application help text if any
         -h      output the BALAD and its debugger help text
         <file>  one or more balad source files (ext .bl).
-$Id: balad 1.10 $
+$Id: balad 1.11 $
 
         After successful assembly the program starting at 'main'
         (if defined) is run - else enter the Debugger (prompt >>).
