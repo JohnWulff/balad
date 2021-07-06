@@ -1,0 +1,836 @@
+#!/usr/bin/baladII
+########################################################################
+#
+#	Copyright (C) 2020  John E. Wulff
+#
+#   You may distribute under the terms of either the GNU General Public
+#   License or the Artistic License, as specified in the next line.
+#
+#	SPDX-License-Identifier: GPL-3.0+ OR Artistic-2.0
+#
+#  Reverse Polish Notation Calculator 'GEORGE'
+#
+#	see help text at the end of the file for a full description
+#
+#  Historical Note: I wrote my first computer program in 1957 for a
+#  Reverse Polish Notation Calculater called 'GEORGE', which ran as an
+#  interpreter on the 'UTECOM' computer at the University of NSW. UTECOM
+#  was the third digital electronic computer installed in Australia.  It
+#  nearly filled a large room in the first building on the campus in
+#  Kensington.
+#
+#  GEORGE had been written by one of my lecturers, who was teaching us
+#  Boolean Logic as part of a philosophy course. In 1956 UTECOM had
+#  384 x 32 bit words of memory implemented as 12 mercury delay lines.
+#  This is very similar in memory size and precision to the BALAD
+#  computer, which was first implemented by me in 1970 as a teaching aid.
+#
+#  I have named this program 'george.bl' in honour of my former lecturer.
+#
+#  $Id: georgeII.bl 1.7 $
+#
+########################################################################
+
+######  Variables and Constants  #######################################
+
+	LOC 2
+
+dest:	0L		; double precision result
+src:	0L		; double precision src
+rem:	0L		; double precision remainder for long div
+lambda:	0		; subroutine pointer for nameless computed call
+savACC:	0		; used in main swpNow and mult
+expPTR:	0		; byte pointer into epression string (global)
+stackP:	0		; stack pointer                      (global)
+digits:	0		; count digits in a number           (global)
+hexFl:	0		;                                    (global)
+inBase:	0		;                                    (global)
+asBase:	0		;                                    (global)
+expADR:	ADR expr	; word address of expression string
+stackA:	ADR stack	; top of stack (growing downwards)
+funPAd:	ADR @funAdr	; indirect address of function pointer list
+funAdr:	ADR add		; function pointer list array
+	ADR sub
+	ADR mul
+	ADR div
+space:	" "		; also 32; white space
+tab:	"\t"
+nl:	"\n"		; also 10
+addOp:	"+"		; + token
+subOp:	"-"		; - token
+mulOp:	"*"		; * token
+divOp:	"/"		; / token
+ASC_0:	"0"
+ASC_9_:	":"		; "9"+1
+ASC_a:	"a"
+ASC_f_:	"g"		; "f"+1
+ASC_C:	"C"
+ASC_D:	"D"
+ASC_E:	"E"
+ASC_R:	"R"
+ASC_S:	"S"
+ASC_n:	"n"
+ASC_r:	"r"
+ASC_d:	"d"
+ASC_o:	"o"
+ASC_x:	"x"
+ASC_b:	"b"
+ASC_q:	"q"
+D16:	16
+D2:	2
+D4:	4
+D8:	8
+D87:	87		; "a"-10 convert a -f to 10 -15
+C377:	0377		; character mask (8 bits for 16 bit word)
+prompt:	"RPN"
+fmtDP:	" %#ld"		; should be near the front so no backward reference
+inpEms:	"? %c\n"
+errMsg:	"? err\n";	; errMsg+3 is 00000 HLT
+
+######  Start of main program  #########################################
+
+	LOC 100
+
+main:	LDA stackA	; top of stack - clear the stack
+	STA stackP	; stack grows downwards towards 'expr'
+
+########################################################################
+#  Get a new RPN expression string
+########################################################################
+
+loop:	KCS expr	; grow expression upwards towards stack
+	LDA expADR	; expr[] address
+	STA expPTR	; word pointer first
+	JMS iniDig	; clear digits, hexFl -1, decimal base, C
+	JMP .+2		; skip first ROR - start with even byte of expr[0]
+
+########################################################################
+#  Get another byte token from the expression string
+########################################################################
+
+gettok:	ROR expPTR	; change to word pointer and carry for odd bytes
+	LDA @expPTR	; two bytes from the expression
+	JZC .+2		; skip SWP for even bytes
+	SWP ACC		; swap bytes for odd bytes
+	ROL expPTR	; change to byte pointer
+	INC expPTR	; increment expression byte pointer
+	AND C377	; mask to 8 bit character from expression
+
+########################################################################
+#  0 - 9 a - f  analyze number input
+########################################################################
+
+	CMP ASC_0	; "0"
+	JLT notDig
+	CMP asBase	; "9"+1, "8", "2", "f"+1
+	JGE notDig
+
+	TST hexFl	; 1 before 0x, 0 after 0x, else -1 -2 etc
+	JNR digFd	; 0 - 9, 0 - 7 or 0-1 found
+
+	CMP ASC_a	; hex -must test "a" first
+	JLT notA_F	; not a - f
+	SUB D87		; "a"-10 convert a -f to 10 -15
+	JMP convrt
+
+notA_F:	CMP ASC_9_	; "9"+1
+	JGE notDig	; fall through for hex 0 - 9
+
+digFd:	SUB ASC_0	; convert ascii to binary 0 - 9
+convrt:	STA savACC	; save accumulator
+
+	TST digits	; is this the first digit ?
+	JNR num1	; no
+	CLR dest	; yes - first digit
+	CLR dest+1	; clear DP result for new number
+	TST ACC		; is first digit '0' ?
+	JNR num1	; no
+	INC ACC		; yes
+	INC digits	; 1 - first '0' is a number, even by itself
+	STA hexFl	; 1 look for x or b after first digit 0
+	LDA D8
+	STA inBase	; change input base to octal for now
+	ADD ASC_0	; "8" is ascii base - end of number range
+	JMP stAsB	; no need to convert first digit '0'
+
+########################################################################
+#  0 - 9 a - f  Build an unsigned integer in 'dest'
+#	TODO - check for number overflow
+#  **** There is not enough room in the BALAD memory to do this check
+########################################################################
+
+num1:	INC digits	; number is growing
+	LDA inBase	; 10, 8, 16 or 2
+	STA src		; multiplier
+	CLR src+1	; multiplicand dest is previous number
+	LDA savACC	; restore accumulator - new binary digit
+	JMS mult
+	JMP gettok	; get next digit or next operator
+
+########################################################################
+#  Not a digit - check for 0x and 0b
+########################################################################
+
+notDig:	STA savACC	; save accumulator
+	DEC hexFl	; was there a first digit 0 ?
+	JNR notNum	; no (hexFl changes after first digit)
+	CMP ASC_x	; yes - hexFlag is now 0 - is this "x" ?
+	JNE tst_b	; no
+	LDA D16		; yes
+	STA inBase	; change input base to hexadecimal
+	LDA ASC_f_
+	JMP stAsB	; 0x is a hex number - leave hexFl 0
+
+tst_b:	CMP ASC_b	; yes - is this "b" ?
+	JNE notNum	; no
+	DEC hexFl	; hexFl now -1 means not hex; C is 1
+	CLR C		; C must be 0 for next digit
+	LDA D2		; yes
+	STA inBase	; change input base to binary
+	ADD ASC_0	; "2"
+stAsB:	STA asBase
+	JMP gettok	; 0b is a binary number
+
+########################################################################
+#  Test RPN token in ACC
+#  Operations which do not require a push of a possible new number
+########################################################################
+
+notNum:	CMP ASC_q	; "q"
+	JZR errMsg+3	; quit the program
+
+	CMP ASC_C	; "C"
+	JZR main	; Clear the stack
+
+	CMP ASC_E	; "E"
+	JNR tstNum
+
+	JMS push	; Enter or duplicate number on stack
+	JMS iniDig	; clear digits, hexFl -1, decimal base, C
+	CLR showFl	; show stack after pushing a new number
+	JMP gettok
+
+########################################################################
+#  Push a newly built number unless already pushed
+########################################################################
+
+tstNum:	TST digits	; has a number been built ?
+	JZR noNum	; no - no new number
+
+	JMS push	; yes - push the new number
+	JMS iniDig	; clear digits, hexFl -1, decimal base, C
+	CLR showFl	; show stack after pushing a new number
+
+noNum:	LDA funPAd	; address of function pointer array funAdr
+	STA lambda	; funAdr[0] add (shared with show and swap/roll)
+	LDA savACC	; restore accumulator
+	JZR expEnd	; end of expression - show result
+			; unless just shown with 'd' 'o' 'x' or 'b'
+	CMP space
+	JZR gettok	; ignore white space
+	CMP tab
+	JZR gettok
+
+########################################################################
+#  Analyze further RPN tokens
+########################################################################
+
+	CLR showFl	; all other tokens force showing the stack again
+			; funAdr[0] add
+	CMP addOp	; "+"
+	JZR execOp
+	INC lambda	; funAdr[1] sub
+	CMP subOp	; "-"
+	JZR execOp
+	INC lambda	; funAdr[2] mul
+	CMP mulOp	; "*"
+	JZR execOp
+	INC lambda	; funAdr[3] div
+	CMP divOp	; "/"
+	JZR execOp
+
+########################################################################
+#  Monadic Arithmetic operations
+#  arithmetic function 'negate'
+#	dest = - dest
+########################################################################
+
+	CMP ASC_n	; "n"
+	JNE test_r
+	JMS pop		; n negate last value on the stack
+	JMS negate	; DP negate destination
+	JMP pushDs	; push result from dest and dest+1
+
+########################################################################
+#  Get remainder of last division and put it on the stack,
+#  which does not change between divisions (No pop involved)
+#	dest = rem
+########################################################################
+
+test_r:	CMP ASC_r	; "r"
+	JNE test_D
+	LDA rem		; get remainder of latest div
+	STA dest
+	LDA rem+1
+	STA dest+1
+	JMP pushDs	; push result from dest and dest+1
+
+########################################################################
+#  Diadic Arithmetic operations
+#  Lambda operation using a computed subroutine call from src and dest.
+#	dest = dest op src	# for op = + - * and /
+########################################################################
+
+execOp:	JMS pop		; popped value to src and src+1
+	LDA dest
+	STA src
+	LDA dest+1
+	STA src+1
+	JMS pop		; popped value is in dest and dest+1
+	JMS @lambda	; execute the selected operation add sub mul div
+
+pushDs:	JMS push	; push result from dest and dest+1
+	JMP gettok	; next token
+
+########################################################################
+#  miscellaneous operators
+########################################################################
+
+test_D:	CMP ASC_D	; "D"
+	JNE test_S
+	JMS pop		; Drop last value on the stack
+	JMP gettok
+
+test_S:	CMP ASC_S	; "S"
+	JNE test_R
+	LDA stackP	; Swap last two numbers on the stack
+	ADD D4
+	JMP swpNow
+
+test_R:	CMP ASC_R	; "R"
+	JNE test_d
+	LDA stackA	; Roll last number on the stack with top of stack
+
+########################################################################
+#  Swap or Roll numbers on the stack
+#	lambda = StackP + 4 for Swap last two numbers on the stack
+#	lambda = stackA     for Roll last number to the top of the stack
+#	Error if only one value on the stack - stack unchanged
+########################################################################
+
+swpNow:	STA lambda	; shared
+	LDA stackP
+	STA savACC	; save stack pointer
+	JMS pop		; last number on the stack (also checks empty stack)
+	LDA stackP	; last number now in 'dest'
+	CMP stackA
+	JLT swp1
+	PRF errMsg	; "? err\n"
+	JMP swp2	; restore stack
+
+swp1:	STA src		; temporary stackP from (shared)
+	SUB D2
+	STA src+1	; temporary stackP to   (shared)
+	LDA lambda
+	STA stackP
+
+swpLp:	LDA @src	; move numbers down on the stack
+	INC src
+	STA @src+1
+	INC src+1
+	LDA src
+	CMP stackP	; until top for swap or roll is reached
+	JLT swpLp
+
+swp2:	JMS push	; push last number on stack to hole further up the stack
+	LDA savACC
+	STA stackP	; restore stack pointer
+	JMP gettok
+
+########################################################################
+#  select the base for the showSt() function and show the stack
+########################################################################
+
+test_d:	CMP ASC_d	; "d"	decimal
+	JEQ show
+
+	CMP ASC_o	; "o"	octal
+	JEQ show
+
+	CMP ASC_x	; "x"	hexadecimal
+	JEQ show
+
+	CMP ASC_b	; "b"	binary
+	JNE inpErr
+
+########################################################################
+#  d o x b Show intermediate results remaining in the stack in different
+#  number bases.
+#  Follow this with the remainder of the RPN expression
+########################################################################
+
+show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
+
+	PCH tab		; "\t" show remainder of RPN expression
+	PCH tab		; "\t" separated by a wide space:w
+	LDA expPTR
+	STA lambda	; shared
+	ROR lambda
+	LDA @lambda	; two bytes from the expression
+	JZC show1	; skip SWP ACC ... CLR C for even bytes
+
+	SWP ACC		; swap bytes for odd bytes
+	AND C377
+	JZR show2	; terminates on 2nd byte
+	INC lambda
+	PCH ACC		; print first odd byte of rest of expression
+	CLR C
+
+show1:	PRF @lambda	; print rest of expression
+show2:	INC showFl	; no need to show stack again if terminated now
+	PCH nl		; "\n"
+	JMP gettok
+
+########################################################################
+#  Input error - RPN token not recognized
+########################################################################
+
+inpErr:	PRF inpEms	; "? %c\n"
+	ADR ACC		; token is character in the accumulator
+	JMP gettok
+
+########################################################################
+#  End of RPN expression - show current values on the stack in decimal
+########################################################################
+
+expEnd:	TST showFl	; was output shown already
+	JNR loop	; yes - don't show again
+
+	LDA ASC_d	; no  - restore decimal output
+	JMS showSt	; " %#ld"
+	PCH nl		; "\n"
+	JMP loop	; get new RPN expression
+
+######  End of main program  ###########################################
+
+######  More variables and constants  ##################################
+
+Csign:	0100000		; sign bit (16 bit)
+sign:	0		; used locally in add sub (mul div via sSgnMD tSgnMD)
+signDn:	0		; sign of destination used in div to adjust rem
+showFl:	0		; used locally to control show stack
+
+######  Subroutines  ###################################################
+
+########################################################################
+#  clear digits, hexFl -1, decimal base, C
+########################################################################
+
+iniDig:	0
+	CLR digits	; 0  start a new number
+	CLR hexFl
+	DEC hexFl	; -1; not hex; C is 1
+	LDA nl		; 10; assume initial decimal input
+	STA inBase	; change input base to decimal
+	LDA ASC_9_
+	STA asBase
+	CLR C		; C must be 0 for first byte of gettoken
+	JMP @iniDig
+
+########################################################################
+#  push a double precision number on the stack downwards
+#	double precision value to be pushed in dest and dest+1
+#	TODO - check stackP meeting end of expression
+#  **** There is not enough room in the BALAD memory to do this check
+########################################################################
+
+push:	0
+	LDA dest+1
+	DEC stackP
+	STA @stackP
+	LDA dest
+	DEC stackP	; points to current DP number pushed onto stack
+	STA @stackP
+	JMP @push
+
+########################################################################
+#  pop a double precision number from the stack upwards
+#	return Ok    double precision number in dest and dest+1
+#	bail out to loop: on Error stack is empty
+########################################################################
+
+pop:	0
+	LDA stackP
+	CMP stackA
+	JLT popOk
+	PRF errMsg	; "? err\n"
+	JMP loop	; stack is empty error
+
+popOk:	LDA @stackP
+	INC stackP
+	STA dest
+	LDA @ stackP
+	INC stackP	; points to next DP number to be popped
+	STA dest+1
+	JMP @pop
+
+########################################################################
+#  Show all results remaining on the stack
+#  This is done at the end of an input expression and for the d operation
+#  as well as the o, x and b output operations with base 8, 16 and 2
+#	arg1	ACC	; character d o x b replacing d in " %#ld"
+########################################################################
+
+showSt:	0
+	STA fmtDP+2	; " %#ld" " %#lo" " %#lx" " %#lb"
+	LDA stackA	; stack address to temporary stack pointer in ACC
+	CLR C
+showNx:	CMP stackP
+	JLE @showSt	; current end of stack
+	SUB D2		; decrement by 2
+	PRF fmtDP	; " %#ld" " %#lo" " %#lx" " %#lb"
+	ADR @ACC	; indirect pointer to value on the stack
+	JMP showNx
+
+########################################################################
+#  double precision negate
+#	dest = -dest
+#	return double precision number in dest and dest+1
+#	ACC is not modified
+########################################################################
+
+negate:	0
+	CLR C
+	NEG dest
+	JNR .+2
+	DEC dest+1	; dest was 0
+	COM dest+1	; double precision negate
+	JMP @negate
+
+########################################################################
+#  Test signs of dest and src for 'add' and 'sub' routines
+########################################################################
+
+tSgnAS:	0
+	STA dest+1
+	LDA Csign	; sign bit
+	AND dest+1
+	CLR C
+	ADD Csign	; complement sign to make equal signs differ
+	CMP sign	; no overflow if signs of dest and src differ or
+	JNE @tSgnAS	; sign of result equals sign of dest
+	PRF errMsg	; "? err\n";
+	JMP tSgnAS
+
+########################################################################
+#  double precision signed add
+#	dest = dest + src
+#	return double precision number in dest and dest+1
+#	return truncated result in dest and dest+1 if overflow err message
+########################################################################
+
+add:	0
+	LDA Csign
+	AND dest+1
+	STA sign	; sign bit of dest
+	LDA Csign
+	AND src+1
+	CMP sign	; compare sign of dest with sign of src
+	JEQ .+2
+	INC sign	; sign of dest and src differ (no overflow)
+
+	LDA dest	; double precision add dest + src
+	CLR C
+	ADD src
+	STA dest
+	LDA dest+1
+	ADD src+1
+	JMS tSgnAS	; test for overflow
+	JMP @add
+
+########################################################################
+#  double precision signed subtract
+#	dest = dest - src
+#	return double precision number in dest and dest+1
+#	return truncated result in dest and dest+1 if overflow err message
+########################################################################
+
+sub:	0
+	LDA Csign
+	AND dest+1
+	STA sign	; sign bit of dest
+	LDA Csign
+	AND src+1
+	CMP sign	; compare sign of dest with sign of src
+	JNE .+2
+	INC sign	; sign of dest and src same (no overflow)
+
+	LDA dest	; double precision subtract dest - src
+	CLR C
+	SUB src
+	STA dest
+	LDA dest+1
+	SUB src+1
+	JMS tSgnAS	; test for overflow
+	JMP @sub
+
+########################################################################
+#  Test signs of dest and src for 'mul' and 'div' routines
+#  If sign is negative for either value negate that value
+#  If signs are the same set 'sign' = 0
+#  If signs differ set 'sign' = 0100000
+########################################################################
+
+sSgnMD:	0
+	LDA Csign
+	AND dest+1
+	JZR setS1
+	JMS negate	; ACC not modified
+setS1:	STA signDn	; sign bit of dest
+	LDA Csign
+	AND src+1
+	JZR setS2
+	CLR C
+	NEG src
+	JNR .+2
+	DEC src+1	; src was 0
+	COM src+1	; double precision negate src
+setS2:	CLR C
+	ADD signDn	; sign dest ^ sign src
+	STA sign
+	JMP @sSgnMD
+
+########################################################################
+#  Test sign variable 'sign' set in 'sSgnMD'
+#  If 'sign' is 0 do nothing
+#  If 'sign' is 0100000 negate dest, the result of mul or div
+########################################################################
+
+tSgnMD:	0
+	TST sign	; sign dest ^ sign src
+	JZR @tSgnMD	; positive result
+	JMS negate	; negative result
+	JMP @tSgnMD
+
+########################################################################
+#
+#  Double precision unsigned multiply using rotate right of the multiplyer
+#  and repeated addition of the left shifted multiplicand for every bit of
+#  the multiplyer
+#
+#	JMS mult
+#	arg1	ACC	; value added to the result     - lost
+#	arg2	dest	; double precision multiplicand	- lost
+#	arg3	src	; double precision multiplier	- lost
+#	return	dest 	; double precision result
+#	savACC		; temp save ACC is free in main before JMS mult
+#
+########################################################################
+
+mult:	0		; ACC added to lo part of result
+	CLR ACC+1	; hi part of result initially zero
+
+mult1:	TST src		; is multiplyer all 0's ?
+	JNR mult2
+	TST src+1
+	JZR mult4	; yes - result in ACC,ACC+1
+
+mult2:	CLR C		; no
+	ROR src+1	; multiplyer hi
+	ROR src		; next bit of multiplyer lo
+	JZC mult3	;  0  skip addition of multiplicand
+
+	CLR C		;  1  DP add to result
+	ADD dest	; add shifted lo multiplicand to lo result
+	STA savACC	; save ACC
+	LDA ACC+1	; hi result
+	ADD dest+1	; add shifted hi multiplicand to hi result
+	STA ACC+1
+	LDA savACC	; restore ACC
+
+mult3:	CLR C
+	ROL dest	; double precision shift left of multiplicand
+	ROL dest+1
+	JMP mult1
+
+mult4:	STA dest
+	LDA ACC+1
+	STA dest+1
+	JMP @mult	; return DP result in dest,dest+1
+
+########################################################################
+#  Double precision signed multiply
+#	dest = dest * src
+#	return double precision number in dest and dest+1
+#	return truncated result in dest and dest+1 if overflow
+#	TODO - check for overflow
+#
+#	sign = destHI ^ sign srcHI
+#	negate dest if negative
+#	negate src if negative
+#				[   0  ]
+#	+		[destHI][destLO]
+#	*		[ srcHI][ srcLO]
+#	=		[destHI][destLO]
+#	negate if	    v	    v		sign destHI ^ sign srcHI
+#	=		[destHI][destLO]
+########################################################################
+
+mul:	0
+	JMS sSgnMD	; test sign of dest and src
+	CLR ACC
+	JMS mult	; unsigned double precision multiply
+	JMS tSgnMD	; negate dest if signs of dest and src differ
+	JMP @mul
+
+########################################################################
+#  Basic Binary Division - Steve Auer
+#
+#        Dividend
+#     [z8|z7|z6|z5|z4|z3|z2|z1|z0]<--+ shift
+#      ^| ^| ^| ^| ^| ^| ^| ^| ^     |
+#      |v |v |v |v |v |v |v |v |     |
+#     +--------------+        +-------+
+#     |Subtractor and| comp   |Control|
+#     |  Comparator  |------->|       |
+#     +--------------+        +-------+
+#      ^  ^  ^  ^  ^
+#      |  |  |  |  |
+#     '0'[d3|d2|d1|d0]
+#        Divisor
+#
+#  1. Load the dividend and the divisor to the Z and D registers,
+#     respectively. Reset z8 to zero.
+#     Besides, set the value of the iteration counter to zero.
+#  2. If z8z7z6z5z4 < d3d2d1d0, go to step 3
+#     otherwise set a flag to indicate the overflow condition and
+#     end the algorithm (cannot happen with top 32 bits 0).
+#  3. Shift the Z register to the left by one bit.
+#     The shift operation will vacate the LSB of the Z register.
+#     This empty memory location will be used to store the quotient bit
+#     obtained in the next step.
+#  4. Compare z8z7z6z5z4 with d3d2d1d0: 
+#     a) If z8z7z6z5z4 ≥ d3d2d1d0, set the LSB of the Z register to one
+#        and update the five MSBs of the Z register with the difference
+#        z8z7z6z5z4 − d3d2d1d0.
+#     b) If z8z7z6z5z4 < d3d2d1d0, set the LSB of the Z register to zero
+#        and keep the five MSBs of the Z register unaltered.
+#  5. Increase the value of the counter by one.
+#     If the counter is equal to four, end the algorithm
+#     otherwise go to step 3.
+#
+#  Step 2 above (overflow) cannot happen with the 64 bit dividend.
+#
+#  The above algorithm describes 8/4:4+4 unsigned division and uses 9 bits
+#  for the dividend and 4 bits for the divisor, quotient and remainder.
+#
+#  To implement 32/32:32+32 signed division use sSgnMD and tSgnMD as for
+#  mul and div by repeated subtraction to get the 31 bit absolute value
+#  of dividend and divisor. The sign bits are both 0.
+#
+#  Then use 64 bits for the dividend and 32 bits for the divisor,
+#  quotient and remainder. The sign bits are 0 and the top 32 bits of the
+#  extended dividend are set to 0. Do 32 shifts.
+#  
+#  Double-precision signed divide
+#       dest = dest / src
+#       return double precision quotient in dest and dest+1
+#       return double precision remainder in rem and rem+1
+#       return unchanged + err message if attempt to divide by 0
+########################################################################
+
+div:	0
+	TST src
+	JNR div1
+	TST src+1
+	JNR div1
+	PRF errMsg	; "? err\n"; divisor is 0
+	JMP @div	; return unchanged dest
+
+div1:	JMS sSgnMD	; test sign of dest and src
+	CLR rem		; rem = 0; hi 32 bits if dividend
+	CLR rem+1
+	LDA space	; 32
+	STA lambda
+
+div2:	CLR C
+	ROL dest	; shift 64 bit Z left
+	ROL dest+1
+	ROL rem
+	ROL rem+1
+	LDA rem+1
+	CMP src+1
+	JLT div4	; dest+1 < src+1
+	JNE div3
+	LDA rem		; dest+1 == src+1
+	CMP src
+	JLT div4	; dest < src
+
+div3:	INC dest	; set LSB of Z
+	CLR C
+	LDA rem
+	SUB src
+	STA rem		; rem = rem - src
+	LDA rem+1
+	SUB src+1
+	STA rem+1	; rem+1 = rem+1 - src+1 -C
+
+div4:	DEC lambda
+	JNR div2
+
+	TST signDn	; sign dest
+	JZR div5
+
+	CLR C		; negate rem if dest was negative
+	NEG rem
+	JNR .+2
+	DEC rem+1	; rem was 0
+	COM rem+1	; double precision negate rem
+
+div5:	JMS tSgnMD	; negate dest if signs of dest and src differ
+	JMP @div
+
+######  free for data  #################################################
+
+expr:	0		; RPN expression filled upwards from here
+
+######  Space for the expression and the stack  ########################
+
+	LOC 1776	; stack filled downwards from here
+stack:	ADR prompt	; top of the stack (not overwritten via stackP)
+			; 1776 is also place for user defined prompt address
+
+######  End of BALAD code  #############################################
+__END__			; help text
+  Reverse Polish Notation Calculator 'GEORGE' (baladII 1024 words)
+        0-9     Enter a number terminated by white space or an operator,
+                at which point the number is pushed on the stack.
+        0-7     A number starting with 0 is octal (0-7 only).
+        0-7 a-f A number starting with 0x is hexadecimal (0-9a-f).
+        0-1     A number starting with 0b is binary (0-1 only).
+        + - * / Arithmetic operators which act on the last two numbers
+                popped from the stack. Result is pushed back on the stack.
+                Error if there are less than two values on the stack.
+        n       NEGATE the last number on the stack.
+        r       push the REMAINDER of the last division on the stack.
+        Enter   display numbers on the stack as signed decimal.
+        d       display numbers on the stack as signed decimal numbers
+                before any further operations.
+        o x b   display numbers on the stack in octal, hexadecimal or
+                binary notation before any further operations.
+        E       ENTER a number on the stack if 'E' immediately follows
+                a number; else duplicate the last number on the stack.
+        D       DROP the last number on the stack.
+        S       SWAP the last two numbers on the stack.
+        R       ROLL the stack - move last number to the top of the stack.
+        C       CLEAR the stack.
+        q       QUIT the RPN calculator.
+
+        32 bit signed decimal arithmetic is used, which means all
+        intermediate absolute values must be less than ~2147 million.
+        Arithmetic overflow errors for + and - are reported.
+        Divide by zero and stack underflow errors are reported.
+
+        Check overflow for * (the multiply operator) and overflow of the
+        stack into the area where the input expression is stored has not
+        yet been implemented, although there is now enough memory to do so.
