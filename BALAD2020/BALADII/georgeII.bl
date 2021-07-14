@@ -27,7 +27,7 @@
 #
 #  I have named this program 'george.bl' in honour of my former lecturer.
 #
-#  $Id: georgeII.bl 1.7 $
+#  $Id: georgeII.bl 1.8 $
 #
 ########################################################################
 
@@ -372,7 +372,7 @@ test_d:	CMP ASC_d	; "d"	decimal
 show:	JMS showSt	; " %#ld" " %#lo" " %#lx" " %#lb"
 
 	PCH tab		; "\t" show remainder of RPN expression
-	PCH tab		; "\t" separated by a wide space:w
+	PCH tab		; "\t" separated by a wide space
 	LDA expPTR
 	STA lambda	; shared
 	ROR lambda
@@ -796,9 +796,9 @@ expr:	0		; RPN expression filled upwards from here
 
 ######  Space for the expression and the stack  ########################
 
-	LOC 1776	; stack filled downwards from here
-stack:	ADR prompt	; top of the stack (not overwritten via stackP)
-			; 1776 is also place for user defined prompt address
+	LOC C-1		; stack filled downwards from here
+stack:	ADR prompt	; top of the stack (never overwritten via stackP)
+			; C-1 is also place for user defined prompt address
 
 ######  End of BALAD code  #############################################
 __END__			; help text

@@ -270,7 +270,7 @@ Usage:  @<<<< -clm|-t[doxb]|-h[ <balad_source_file>]
         After successful assembly the program is run starting at
         'main' (if defined) else the Debugger (prompt >>) is entered.
         If there is no <source> file enter code interactively.
-$Id: balad 1.12 $
+$Id: balad 1.13 $
 
 .
 
@@ -324,16 +324,15 @@ Debugger
     <n>,<m>#  CLEAR break or watch points at locations <n> to <m>
     =         list all break or watch points
     <n>,<m>=  list break or watch points in range <n> to <m>
-    < <code>  assemble <code> or <data> at current location
-    <n> < <code>  assemble <code> or <data> at location <n>
+    < <code|data>     assemble <code> or <data> at current location
+    <n> < <code|data> assemble <code> or <data> at location <n>
                   this allows the modification of single locations
 
         List commands show an octal memory address and the contents
     /c        list current location as code
     <n>/c     list location <n> as code
     <n>,<m>/c list locations <n> to <m> as code
-
-        Similarly for different list modes
+        Similarly list data in different list modes
     /d    short signed decimal       /D    long signed decimal
     /u    short unsigned decimal     /U    long unsigned decimal
     /o    short unsigned octal       /O    long unsigned octal
@@ -349,8 +348,8 @@ Debugger
       -o  alternatively trace C, ACC and MR in octal
       -x  alternatively trace C, ACC and MR in hexadecimal
       -b  alternatively trace C, ACC and MR in binary
-          In each case trace values before and after execution.
-          -d etc without -t, trace only at break or watch points.
+              In each case trace values before and after execution.
+              -d etc without -t, trace only at break or watch points.
     -     stop tracing code and data during execution.
 .
 
@@ -430,7 +429,7 @@ for (my $i = 0; $i <= $#argv1; $i++) {
 	warn "<out_file> should not overwrite source file '$argv'\n - define new -O <out_file> in debug\n";
 	$opt_O = '0';
     }
-    $eF += assembleFile(1);	# Pass 1
+    assembleFile(1);		# Pass 1
     $filesAssd++;
     close(IN);
 }
@@ -449,7 +448,7 @@ for (my $i = 0; $i <= $#argv1; $i++) {
 	    $listArgv = $argv;
 	}
     }
-    $eF += assembleFile(2);	# Pass 2
+    assembleFile(2);		# Pass 2
     close(IN);
 }
 if ($list) {
@@ -699,6 +698,7 @@ sub List {
 
 sub Error {
     my ($msg, $imm) = @_;
+    $eF++;					# count errors
     ListOpen($opt_L) unless $list;
     $tmp = sprintf "*** ERROR: %s at %s line %d\n", $msg, $argv, $.;
     if ($_ and not $imm) {
@@ -768,28 +768,26 @@ sub Error {
 sub assembleFile {
     my ($pass) = @_;
     my ($key);
-    my $eFlg = 0;
     $state = 0;				# state 0 none  1 data  2 code
     if (defined fileno IN) {
 	while (<IN>) {					# input from file or stdin until EOF
 	    chomp;					# remove new line
 	    last if m/^\s*q$/ or m/^\s*__END__/;	# quit assembly
-	    $eFlg += assembleLine($pass, $_);		# assemble a line
+	    assembleLine($pass, $_);			# assemble a line
 	}
     } else {
 	while (defined ($_ = $term->readline(""))) {	# interactive input from keyboard until ctrl-d
 	    last if m/^\s*q$/ or m/^\s*__END__/;	# quit assembly
-	    $eFlg += assembleLine($pass, $_);		# assemble a line
+	    assembleLine($pass, $_);			# assemble a line
 	}
     }
     if ($pass == 0) {
-	my $i = $eFlg;					# check for undefined symbols in interactive mode
+	my $i = $eF;					# check for undefined symbols in interactive mode
 	foreach $key (sort keys %symTable) {
 	    if (($tmp = $symTable{$key}) & 01000) {
-		print STDERR "\n" if $i == $eFlg;
+		print STDERR "\n" if $i == $eF;
 		$tmp = sprintf "symbolic reference '%s' at loc %03o has not been defined", $key, $tmp & 0777;
 		Error("$tmp", 1);
-		$eFlg++;
 	    }
 	}
     }
@@ -809,11 +807,10 @@ sub assembleFile {
 	    @lines = ();
 	}
     }
-    if ($eFlg) {
-	my $s = $eFlg >= 2 ? "s" : "";
-	Error("$eFlg error$s during assembly - cannot run", 2);
+    if ($eF) {
+	my $s = $eF >= 2 ? "s" : "";
+	Error("$eF error$s during assembly - cannot run", 2);
     }
-    return $eFlg;
 } # assembleFile
 
 ########################################################################
@@ -822,7 +819,7 @@ sub assembleFile {
 #  One pass assembly of a sigle line called from pass 0 or debug()
 #	parameter1	pass 0 interactive, 1 define labels, 2 finish file assembly
 #	parameter2	$_ text to be assembled
-#	parameter3	new location when called from debug() with <
+#	parameter3	new location when called from debug() with < else undef
 #	return		error count
 #
 ########################################################################
@@ -831,8 +828,7 @@ sub assembleLine {
     my ($pass, $newLoc);
     ($pass, $_, $newLoc) = @_;
     my ($label, $op, $num, $dval, $val, $locp, $locn, $blk, $str, $stmt, $arRef, $sym);
-    my ($line, $i, $bs, $char, $byte, $char0, $byte0);
-    my $errFlag = 0;
+    my ($line, $i, $bs, $char, $byte, $char0, $byte0, $com);
     my $termErrFlg = 0;
     $locn = $blk = $str = $dval = $val = undef;
     s/[ \t]+$//;					# remove trailing spaces and tabs
@@ -885,7 +881,6 @@ sub assembleLine {
 	} elsif ($pass != 1 and $num != $loc) {
 	    $tmp = sprintf "trying to redefine symbolic reference '%s' to %o from %o", $1, $loc, $num;
 	    Error("$tmp");
-	    $errFlag++;
 	}
 	$label = "$1:" if $num == $loc;			# for listing of "string"
     }
@@ -920,84 +915,127 @@ sub assembleLine {
 	$num = 0;
 	if (defined ($i = $2)) {
 	    if (defined $6) {
-		$num = oct($6);					# octal memory reference
+		$num = oct($6);				# octal memory reference
 	    } else {
 		if (defined $9) {
-		    if (defined($tmp = $symTable{$9}) and	# symbolic memory reference
-			($tmp & 01000) == 0) {			# not a reverse link in pass 0
+		    if (defined($tmp = $symTable{$9}) and # symbolic memory reference
+			($tmp & 01000) == 0) {		# not a reverse link in pass 0
 			$num = $tmp;
-		    } elsif ($pass == 0) {
+		    } elsif ($pass == 0 and not defined $newLoc) {
 			if (defined $tmp) {
-			    $num = $tmp & 0777;			# build linked list
+			    $num = $tmp & 0777;		# build linked list
 			}
-			$symTable{$9} = $loc | 01000;		# link from this location
-		    } elsif ($pass == 2) {
-			$tmp = sprintf "%o", $loc;		# ignore pass 1
+			$symTable{$9} = $loc | 01000;	# link from this location
+		    } elsif ($pass != 1) {
+			$tmp = sprintf "%o", $loc;	# ignore pass 1
 			Error("symbolic reference '$9' at loc $tmp has not been defined");
-			$errFlag++;
 		    }
 		} elsif (defined $10) {
-		    $num = $loc;				# '.' relative memory reference
+		    $num = $loc;			# '.' relative memory reference
 		}
 		if (defined $11) {
 		    goto SynErr0 unless $12;
 		    if ($12 eq '-') {
-			$num -= $13;				# negative offset
+			$num -= $13;			# negative decimal offset
 		    } else {
-			$num += $13;				# positive offset
+			$num += $13;			# positive decimal offset
 		    }
 		}
 	    }
 	    if ($pass != 1 and (($num &= 077777) >= (($opCodes{$1}[1] || $4) ? 0777 : 01000))) {
 		$tmp = sprintf "mr %o is illegal %s at loc %o", $num, $num eq 0777 ? "carry" : "memory reference", $loc;
 		Error("$tmp");
-		$errFlag++;
 		goto Err;
 	    }
 	} else { $i = 0; }
-	$val = $op | ($4 ? 01000 : 0) | $num;			# BALAD code statement
+	$val = $op | ($4 ? 01000 : 0) | $num;		# BALAD code statement
 	$line = "$label\t$1 $i$14";
-	$state = $op ? 2 : 1;					# follow with code or data if JMP
+	$state = $op ? 2 : 1;				# follow with code or data if JMP
     ## HLT statement #######################################################
     } elsif (m/\G\s*HLT((\s*[;#].*)?)$/) {
 	$val = 0;						# code HLT (JMP 0)
 	$line = "$label\tHLT$1";
 	$state = 1;						# end of code block
     ## LOC statement #######################################################
-    } elsif (m/\G\s*(LOC)\s*([0-7]+)((\s*[;#].*)?)$/) {
-	$num = oct $2;					# LOC statement	(octal argument)
+    } elsif (m/\G \s*
+	    ( LOC ) \s*				# $1	code
+	    (					# $2	memory reference
+		(				# $3
+		    ( [0-7]+ )			# $4	octal MR
+		    |				#	or
+		    (				# $5
+			(			# $6
+			    ( [A-Za-z]\w* )	# $7	symbolic MR label
+			    |			#	or
+			    ( \. )		# $8	current location for relative MR
+			)
+			( \s*			# $9	optional
+			    ( [+-] )? \s*	# $10	sign - missing is error
+			    ( \d+  )		# $11	decimal offset
+			)?
+		    )
+		)
+	    )
+	    (					# $12	optional comment (always defined)
+		( \s* [;#].* )?			# $13
+	    )
+	$/x ) {
+	if (defined $4) {
+	    $num = oct($4);				# octal memory reference
+	} else {
+	    if (defined $7) {
+		if (defined($tmp = $symTable{$7})) {	# symbolic memory reference
+		    $num = $tmp;
+		} elsif ($pass != 1) {
+		    $tmp = sprintf "%o", $loc;		# ignore pass 1
+		    Error("symbolic reference '$7' at loc $tmp has not been defined");
+		    goto Err;
+		}
+	    } elsif (defined $8) {
+		$num = $loc;				# '.' relative memory reference
+	    }
+	    if (defined $9) {
+		goto SynErr0 unless $10;
+		if ($10 eq '-') {
+		    $num -= $11;			# negative decimal offset
+		} else {
+		    $num += $11;			# positive decimal offset
+		}
+	    }
+	}					# LOC statement	(octal, symbolic or relative argument)
+	$com = $12;				# optional comment
 	goto TestLOC;
     ## BLK statement #######################################################
     } elsif (m/\G\s*(BLK)\s*([1-9]\d*)((\s*[;#].*)?)$/) {
-	$blk = $num = $loc + $2;				# BLK statement (decimal argument)
+	$blk = $num = $loc + $2;		# BLK statement (unsigned decimal argument)
+	$com = $2;				# optional comment
       TestLOC:
 	$termErrFlg = $state;
 	if ($pass != 1 and ($num <= 0 or $num >= 0777)) {
 	    $num = sprintf "%o", $num;
 	    Error("LOC $num; 0 and 777 are reserved, > 777 is illegal");
-	    $errFlag++;
 	    goto Err;
-	} elsif ($pass >= 1 and $mem[$num]) {
-	    goto MemERR2;					# LOC already initialised
-	} else {
-	    $locn = $num;					# LOC 01 to 0776 (modify previous loc)
-	    if ($blk) {
-		$line = "$label\t$1 $2$3";			# BLK looks like statement with opt label
-	    } else {
-		$line = "\t$1 $2$3";				# LOC looks like comment
-		$locp = $locn;
-		if ($pass != 1 and $locn != $loc) {		# end of a consecutive block
-		    if ($pair[0] < ($pair[1] = $loc)) {		# any statements or data in this block ?
-			push @groups, [ @pair ];		# record the block
-		    }
-		    $pair[0] = $locn;				# start of a new block
-		}
-	    }
-	    $state = 1;
 	}
+	if ($pass >= 1 and $mem[$num]) {
+	    goto MemERR2;				# LOC already initialised
+	}
+	$locn = $num;					# LOC 01 to 0776 (modify previous loc)
+	if ($blk) {
+	    $line = "$label\t$1 $2$com";		# BLK looks like statement with opt label
+	} else {
+	    $line = "\t$1 $2$com";			# LOC looks like comment
+	    $locp = $locn;
+	    if ($pass != 1 and $locn != $loc) {		# end of a consecutive block
+		if ($pair[0] < ($pair[1] = $loc)) {	# any statements or data in this block ?
+		    push @groups, [ @pair ];		# record the block
+		}
+		$pair[0] = $locn;			# start of a new block
+	    }
+	}
+	$state = 1;
     ## unsigned decimal number #############################################
     } elsif (m/\G\s*([1-9]\d*)([lL]?)((\s*[;#].*)?)$/) {
-	$num = $1;						# unsigned decimal number
+	$num = $1;					# unsigned decimal number
 	goto TestNUM;
     ## octal, hexadecimal or binary number #################################
     } elsif (m/\G\s*(0[0-7]*)([lL]?)((\s*[;#].*)?)$/ or	# octal number
@@ -1012,7 +1050,6 @@ sub assembleLine {
 		$dval = ($num >> 15) & 077777;
 	    } elsif ($pass != 1) {
 		Error("unsigned long number must be less than 1,073,741,824 (10000000000 octal)");
-		$errFlag++;
 		goto Err;
 	    }
 	} else {
@@ -1020,14 +1057,13 @@ sub assembleLine {
 		$val  = $num;					# short number
 	    } elsif ($pass != 1) {
 		Error("unsigned short number must be less than 32,768 (100000 octal)");
-		$errFlag++;
 		goto Err;
 	    }
 	}
 	$line = "$label\t$1$2$3";
     ## signed decimal number ###############################################
     } elsif (m/\G\s*([-+])\s*(\d+)([lL]?)((\s*[;#].*)?)$/) {
-	$num = $2;						# signed decimal number
+	$num = $2;
 	$termErrFlg = $state;
 	if ($3) {
 	    if ($num <= 03777777777) {				# long number
@@ -1036,7 +1072,6 @@ sub assembleLine {
 		$dval = ($num >> 15) & 077777;
 	    } elsif ($pass != 1) {
 		Error("absolute value of long signed number must be less than 536,870,912 (4000000000 octal)");
-		$errFlag++;
 		goto Err;
 	    }
 	} else {
@@ -1044,7 +1079,6 @@ sub assembleLine {
 		$val  = $1 eq '-' ? -$num & 077777 : $num;
 	    } elsif ($pass != 1) {
 		Error("absolute value of short signed number must be less than 16,384 (40000 octal)");
-		$errFlag++;
 		goto Err;
 	    }
 	}
@@ -1052,17 +1086,16 @@ sub assembleLine {
     ## character "string" ##################################################
     } elsif (m/\G\s*"(.*)"((\s*[;#].*)?$)/) {
 	$termErrFlg = $state;
-	$str  = $1;						# character string
+	$str  = $1;
 	$line = "$label\t\"$1\"$2";
     ## blank line or comment in a data block ###############################
     } elsif (m/\G((\s*[;#].*)?)$/) {
-	$line = "$label$1";					# blank line or comment only
+	$line = "$label$1";
 	$state   = 0 unless $state == 2;
     ## data not recognised #################################################
     } elsif ($pass != 1) {
       SynErr0:
 	Error("syntax error - code or data not recognised");
-	$errFlag++;
 	goto Err;
     }
     ########################################################################
@@ -1148,7 +1181,6 @@ sub assembleLine {
 	## code not recognised or improper code block termination ##############
 	$num = sprintf "%o", $loc;
 	Error("code block not terminated by a JMP or HLT instruction at loc $num");
-	$errFlag++;
     }
     goto Finish;
   MemERR0:
@@ -1159,7 +1191,6 @@ sub assembleLine {
   MemERR2:
     $num = sprintf "%o", $num;
     Error("LOC $num illegal or already initialised with code or data");
-    $errFlag++;
   Err:
     $line = $_;							# record line in case of error
     if ($opt_l) {
@@ -1175,7 +1206,6 @@ sub assembleLine {
 	    if ($pass == 2 and defined $memSrc[$locp]) {
 		$tmp = sprintf "new code or data overwrites previous data in loc %03o", $locp;
 		Error("$tmp", 1);
-		$errFlag++;
 	    }
 	    $memSrc[$locp] = [ @lines ];
 	    @lines = ();
@@ -1188,7 +1218,6 @@ sub assembleLine {
 	    printf "%03o\t", $loc;
 	}
     }
-    return $errFlag;
 } # assembleLine
 
 ########################################################################
@@ -1279,13 +1308,13 @@ sub debug {
 		    die "can't open STDIN ???";
 		$argv = "STDIN";			# enter first code or data
 	    }
-	    my $eF = assembleFile(0);		# interactive pass 0
+	    assembleFile(0);			# interactive pass 0
 	    if (-t STDIN) {
 		print("\n");
 	    } else {
 		close(IN);
 	    }
-	    exit($eF) if $opt_c;		# quit BALAD after compile check
+	    exit($eF) if $opt_c or $eF;		# quit BALAD after compile check
 	}
     }
     ########################################################################
@@ -1339,6 +1368,7 @@ sub debug {
 		    ########################################################################
 		    $argv = "keyboard input";
 		    $opt_l = 1;			# interactive input is best with listing
+		    $eF = 0;			# reset error count
 		    print "Enter LOC and code or data interactively (q to return to debugger)\n\n\t";
 		    assembleFile(0);		# interactive pass 0
 		    print("\n");
@@ -1379,7 +1409,7 @@ sub debug {
 			$num = oct($4);			# octal memory reference
 		    } else {
 			if (defined $7) {
-			    if (defined($tmp = $symTable{$7})) {# symbolic memory reference
+			    if (defined($tmp = $symTable{$7})) { # symbolic memory reference
 				$num = $tmp;
 			    } else {
 				warn "??? symbolic reference '$7' has not been defined\n";
@@ -1390,9 +1420,9 @@ sub debug {
 			}
 			if (defined $9) {
 			    if ($10 eq '-') {
-				$num -= $11;		# negative offset
+				$num -= $11;		# negative decimal offset
 			    } elsif ($10 eq '+') {
-				$num += $11;		# positive offset
+				$num += $11;		# positive decimal offset
 			    }
 			}
 		    }
@@ -1400,7 +1430,7 @@ sub debug {
 			warn"??? memory limit is octal 777\n";
 			next;
 		    }
-		    $pc = (defined $2) ? ($mem[$num] & 0777) : $num;	# @address : address
+		    $pc = (defined $2) ? ($mem[$num] & 0777) : $num; # @address : address
 		    $opt_B = "";			# can no longer accept Batch data
 		    run();
 		    next;
@@ -1521,9 +1551,9 @@ sub debug {
 		    }
 		    if (defined $9) {
 			if ($10 eq '-') {
-			    $num -= $11;			# negative offset
+			    $num -= $11;			# negative decimal offset
 			} elsif ($10 eq '+') {
-			    $num += $11;			# positive offset
+			    $num += $11;			# positive decimal offset
 			}
 		    }
 		}
@@ -1531,13 +1561,13 @@ sub debug {
 		    warn"??? memory limit is octal 777\n";
 		    next;
 		}
-		$lstart = $lfin = (defined $2) ? ($mem[$num] & 0777) : $num;	# @address : address
+		$lstart = $lfin = (defined $2) ? ($mem[$num] & 0777) : $num; # @address : address
 		if (defined $12) {
 		    if (defined $15) {				# optional end of range
 			$num = oct($15);			# octal memory reference
 		    } else {
 			if (defined $18) {
-			    if (defined($tmp = $symTable{$18})) {	# symbolic memory reference
+			    if (defined($tmp = $symTable{$18})) { # symbolic memory reference
 				$num = $tmp;
 			    } else {
 				warn "??? symbolic reference '$18' has not been defined\n";
@@ -1548,9 +1578,9 @@ sub debug {
 			}
 			if (defined $20) {
 			    if ($21 eq '-') {
-				$num -= $22;			# negative offset
+				$num -= $22;			# negative decimal offset
 			    } elsif ($21 eq '+') {
-				$num += $22;			# positive offset
+				$num += $22;			# positive decimal offset
 			    }
 			}
 		    }
@@ -1777,8 +1807,7 @@ sub run {
     my ($t0, $t1, $sec, $usec);
     my ($instr, $op, $at, $num, $next, $jmsFlag, $n, $watch, $mv, $label, $jmsMr, $sym);
     if ($eF) {
-	warn "*** ERROR: cannot run because of previous $eF assembly errors\n";
-	exit;
+	die "*** ERROR: cannot run because of previous $eF assembly errors\n";
     }
     $mem[0] = $mem[0777] = $jR = $jC = $jmsCall = $break = $next = $abort = 0;	# clear ACC, C and jump testers
     @jmsStack = ();
